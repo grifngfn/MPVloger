@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Watch history · build 11-25d</title>
+<title>Watch history · build 11-25h</title>
 <style>
 :root{--bg:#f2f2f8;--card:#fff;--card2:#ececf4;--text:#17171f;--mute:#707084;--line:#dedeea;--accent:#6d5efc;--accent2:#c06cff;--ok:#16a34a;--warn:#f59e0b;--bar:rgba(242,242,248,.78);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0a10;--card:#14141d;--card2:#1d1d29;--text:#f0f0f7;--mute:#9a9ab0;--line:#262636;--accent:#8b7dff;--accent2:#ff7ad9;--ok:#4ade80;--bar:rgba(10,10,16,.75);color-scheme:dark}}
@@ -99,15 +99,15 @@ details>summary{cursor:pointer}
 <h1>Watch history</h1>
 <p id="msg" class="mute">Your log is read and shown in this browser only; nothing is uploaded.</p>
 <p id="err" hidden style="color:#ef4444;font-weight:600"></p>
-<p id="sum" class="mute"></p>
 <label id="drop"><b>Choose watch-history.jsonl</b><span class="mute">or drop it anywhere on this page</span><input id="file" type="file" accept=".jsonl,.json,.txt" hidden></label>
 <div id="app" hidden>
 <div class="tools">
-<div class="tabs"><button id="tabS" data-tab="series" class="on">Series</button><button id="tabM" data-tab="movies">Movies</button></div>
+<div class="tabs"><button id="tabS" data-tab="series" class="on">Series</button><button id="tabM" data-tab="movies">Movies</button><button data-tab="info">Info</button></div>
 <div class="tabs" title="How watch time is counted"><button data-mode="played" class="on">Reported playtime</button><button data-mode="runtime">Video runtime</button><button data-mode="open">Open→close</button></div>
 <button class="chip on" id="mrg" title="Merge records of the same file opened within 3 seconds of each other">Merge double launches</button>
-<button class="chip" id="exp1">Export library CSV</button><button class="chip" id="exp2">Export sessions CSV</button>
+<button class="chip" id="exp1">Export library CSV</button><button class="chip" id="exp2">Export sessions CSV</button><button class="chip" id="lp" title="Fetch posters from AniList / MyAnimeList (sends show titles to those sites)">Load posters</button>
 </div>
+<div id="dash">
 <section id="stats" class="stats"></section>
 <section class="g2">
 <div class="panel"><h3>Last 30 days · click a bar to filter</h3><div id="daily" class="bars"></div></div>
@@ -126,7 +126,8 @@ details>summary{cursor:pointer}
 <select id="prog" autocomplete="off"><option value="all">Any progress</option><option value="done">Finished</option><option value="part">Not finished</option></select><small id="hid" class="mute"></small><button class="chip" id="clr" hidden>Clear filters ✕</button>
 </div>
 <div id="list" class="lib" style="margin-top:12px"></div>
-<details class="panel" style="margin-top:26px"><summary>All records (<span id="nrec">0</span>) and why each is shown or hidden</summary><div id="raw" style="margin-top:10px"></div></details>
+</div>
+<section id="info" class="panel" style="margin-top:18px" hidden><div id="infoBody"></div></section>
 </div>
 </main>
 <div id="veil"></div>
@@ -144,7 +145,7 @@ const dur=s=>{if(s<60)return Math.round(s)+"s";const h=Math.floor(s/3600),m=Math
 const hue=s=>{let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))%360;return h};
 const initials=t=>t.split(/\s+/).filter(Boolean).slice(0,2).map(w=>[...w][0].toUpperCase()).join("");
 const lab=(s,e)=>e==null?"Movie":(s!=null?`S${pad(s)}`:"")+`E${pad(e)}`;
-let sessions=[],G=new Map(),tab="series";
+let sessions=[],G=new Map(),tab="series",INFO={},showInfo=false,postersOn=false,whyFn=null;
 
 function parseName(fn){
   let s=fn.replace(/\.(mkv|mp4|avi|webm|mov|m4v|ts|flv|wmv|mpe?g)$/i,"");
@@ -174,37 +175,78 @@ function withFolder(p,f){
   return p;
 }
 
-/* Posters: AniList, then Jikan (MyAnimeList) as fallback; cached in this browser. */
-let covers={},fails=0,covQueue=Promise.resolve();
+/* Posters: AniList first, then Jikan (MyAnimeList). Cached in this browser. */
+let covers={},covQueue=Promise.resolve();
+const covStat={ok:0,none:0,fail:0,img:0,err:""},badUrls=new Set();
 try{covers=JSON.parse(localStorage.getItem("wh-covers2")||"{}")}catch{}
 const saveCovers=()=>{try{localStorage.setItem("wh-covers2",JSON.stringify(covers))}catch{}};
+const where=()=>location.protocol==="file:"?"local file":(location.protocol==="about:"||location.protocol==="blob:")?"embedded preview (open the saved file from disk instead)":location.host||location.protocol;
+const covText=()=>`${covStat.ok} found · ${covStat.none} not found · ${covStat.fail} failed`+(covStat.img?` · ${covStat.img} images blocked`:"")
+  +(covStat.err?` · last error: ${covStat.err}`:"")+((covStat.fail||covStat.img)?` · page: ${where()}`:"");
+const covNote=()=>{const d=$("covdbg");if(d)d.textContent=covText()};
+// A result only counts if most words of our title appear in one of its titles (avoids wrong posters).
+const STOP=new Set(["and","the","of","to","no","wa","ga","a","in"]);
+const norm=t=>String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
+function match(title,names){
+  const words=norm(title).split(" ").filter(w=>w&&!STOP.has(w));
+  return words.length>0&&names.some(n=>{const c=norm(n);return words.filter(w=>c.includes(w)).length/words.length>=0.75});
+}
+// Search variants: full title, hyphens as spaces, and the part before "and/the/to/:/ - ".
+const variants=t=>[...new Set([t,t.replace(/[-_]/g," "),t.split(/\s+(?:and|the|no|to|of)\s+|:\s*|\s-\s/i)[0]].map(v=>v.trim()).filter(v=>v.length>=3))];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Returns a poster URL, "" if neither site has the title, or throws if a site could not be reached.
 async function fetchCover(t){
-  let r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({query:"query($s:String){Media(search:$s,type:ANIME){coverImage{large}}}",variables:{s:t}})});
-  if(r.ok){const u=(await r.json())?.data?.Media?.coverImage?.large;if(u)return u}
-  else if(r.status!==404)throw 0;
-  r=await fetch("https://api.jikan.moe/v4/anime?limit=1&q="+encodeURIComponent(t));
-  if(r.ok)return (await r.json())?.data?.[0]?.images?.jpg?.image_url||"";
-  if(r.status===429||r.status>=500)throw 0;
+  let err="";
+  for(const v of variants(t)){
+    try{
+      const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({query:"query($s:String){Page(perPage:5){media(search:$s,type:ANIME){coverImage{large} title{romaji english native} synonyms}}}",variables:{s:v}})});
+      if(r.ok){for(const m of (await r.json())?.data?.Page?.media||[]){
+        if(m.coverImage?.large&&match(t,[m.title?.romaji,m.title?.english,m.title?.native,...(m.synonyms||[])].filter(Boolean)))return m.coverImage.large}}
+      else err="AniList HTTP "+r.status;
+    }catch(e){err="AniList: "+(e.message||e);break}
+    await sleep(300);
+  }
+  for(const v of variants(t)){
+    try{
+      const r=await fetch("https://api.jikan.moe/v4/anime?limit=5&q="+encodeURIComponent(v));
+      if(r.ok){for(const m of (await r.json())?.data||[]){
+        const u=m.images?.jpg?.image_url;
+        if(u&&match(t,[m.title,m.title_english,m.title_japanese,...(m.titles||[]).map(x=>x.title)].filter(Boolean)))return u}}
+      else err+=(err?" · ":"")+"Jikan HTTP "+r.status;
+    }catch(e){err+=(err?" · ":"")+"Jikan: "+(e.message||e);break}
+    await sleep(400);
+  }
+  if(err)throw new Error(err);
   return "";
 }
 function applyCover(el,url){
   if(!url)return;
   const im=new Image();
   im.onload=()=>{el.style.backgroundImage=`url("${url}")`;el.classList.add("img")};
+  im.onerror=()=>{if(badUrls.has(url))return;badUrls.add(url);covStat.img++;covStat.err="image blocked from "+new URL(url).host;covNote()};
   im.src=url;
 }
 function loadCover(el){
   const k=el.dataset.k;
   if(k in covers){applyCover(el,covers[k]);return}
+  if(!postersOn)return;
   covQueue=covQueue.then(async()=>{
     if(!el.isConnected)return;
     if(k in covers){applyCover(el,covers[k]);return}
-    try{covers[k]=await fetchCover(el.dataset.t);saveCovers();applyCover(el,covers[k])}
-    catch{if(++fails===3)$("msg").textContent="Posters could not be fetched. Open this file in your normal browser (not a preview pane) and check your connection."}
+    try{
+      covers[k]=await fetchCover(el.dataset.t);saveCovers();
+      covers[k]?covStat.ok++:covStat.none++;applyCover(el,covers[k]);
+    }catch(e){covStat.fail++;covStat.err=e.message||String(e)}
+    covNote();
     await new Promise(r=>setTimeout(r,700));
   });
 }
+$("info").addEventListener("click",e=>{
+  if(e.target.id!=="retry")return;
+  for(const k in covers)if(!covers[k])delete covers[k];
+  saveCovers();Object.assign(covStat,{none:0,fail:0,img:0,err:""});badUrls.clear();postersOn=true;view();renderInfo();
+});
 const covers$=root=>root.querySelectorAll(".cov").forEach(loadCover);
 const cov=(k,t,x="")=>`<div class="cov" data-k="${esc(k)}" data-t="${esc(t)}" style="--h:${hue(k)}">${esc(initials(t))}</div>`;
 
@@ -234,6 +276,7 @@ function rebuild(first){
   for(const s of list)s.secs=calc(s);
   sessions=list.sort((a,b)=>a.om-b.om);
   view(first);
+  if(showInfo)renderInfo();
 }
 
 async function load(file){
@@ -251,13 +294,14 @@ async function load(file){
         day:r.opened.slice(0,10),pct:typeof r.percent==="number"?r.percent:null,size:typeof r.size_bytes==="number"?r.size_bytes:0});
     }catch{bad++}
   }
-  $("msg").textContent=`${file.name} · ${RAW.length} records · ${played} with reported playtime · ${runtime} with video runtime · newest entry ${newest.slice(0,16).replace("T"," ")} · build 11-25d${bad?` · ${bad} skipped`:""}`;
-  { // one-line summary of everything parsed, ignoring all filters and tabs
+  INFO={file:file.name,records:RAW.length,played,runtime,newest:newest.slice(0,16).replace("T"," "),bad,found:""};
+  { // everything parsed, ignoring all filters and tabs (shown only in the Info tab)
     const by=new Map();
     for(const x of RAW){const k=(x.ep==null?"m:":"s:")+x.key;let a=by.get(k);if(!a)by.set(k,a={t:x.title,m:x.ep==null,e:new Set()});if(x.ep!=null)a.e.add(x.ep)}
-    $("sum").textContent="Found: "+[...by.values()].map(a=>a.m?`${a.t} (movie)`:`${a.t} (E${[...a.e].sort((p,q)=>p-q).join(", E")})`).join(" · ");
+    INFO.found=[...by.values()].map(a=>a.m?`${a.t} (movie)`:`${a.t} (E${[...a.e].sort((p,q)=>p-q).join(", E")})`).join(" · ");
   }
-  ["q","from","to"].forEach(id=>$(id).value="");$("prog").value="all";$("min").value="30";tab="series";
+  $("msg").hidden=true;
+  ["q","from","to"].forEach(id=>$(id).value="");$("prog").value="all";$("min").value="30";tab="series";showInfo=false;$("dash").hidden=false;$("info").hidden=true;
   $("drop").classList.add("mini");$("app").hidden=false;rebuild(true);
 }
 
@@ -269,6 +313,15 @@ function dlCSV(name,rows){
   a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 const mins=s=>Math.round(s/6)/10;
+function renderInfo(){
+  const rows=[...sessions].reverse().slice(0,500).map(s=>{const w=whyFn?whyFn(s):"";
+    return `<div class="rr"><span>${s.opened.slice(0,10)} ${s.opened.slice(11,16)}</span><span>${esc(s.title)} · ${lab(s.season,s.ep)}</span><span>${dur(s.secs)} · ${s.pct==null?"–":Math.round(s.pct)+"%"}</span><span class="${w==="shown"?"ok":"mute"}">${w}</span></div>`}).join("");
+  $("infoBody").innerHTML=`<h3>Log</h3><p>${esc(INFO.file||"")} · ${INFO.records} records · ${INFO.played} with reported playtime · ${INFO.runtime} with video runtime · newest entry ${INFO.newest}${INFO.bad?` · ${INFO.bad} skipped`:""} · ${merged} double launches merged</p>`
+    +`<h3>Found</h3><p>${esc(INFO.found)}</p>`
+    +`<h3>Posters</h3><p><span id="covdbg">${postersOn?"":"Not loaded. Press “Load posters” above. "}${covText()}</span> <button class="chip" id="retry">Retry posters</button></p>`
+    +`<h3>Page</h3><p>build 11-25h · ${where()}</p>`
+    +`<h3>All records (${sessions.length}) and why each is shown or hidden</h3>${rows}`;
+}
 function exportLibrary(){
   const rows=[["title","type","season","episode","sessions","time_min","best_percent","finished","last_watched","filename"]];
   for(const a of LAST.groups)for(const e of a.eps.values())
@@ -303,7 +356,7 @@ function view(first){
   $("clr").hidden=!(q||from||to||prog!=="all");
   const ser=new Set(),mov=new Set();for(const s of sessions)if(common(s))(s.ep==null?mov:ser).add(s.key);
   $("tabS").textContent=`Series · ${ser.size}`;$("tabM").textContent=`Movies · ${mov.size}`;
-  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
+  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("on",b.dataset.tab===(showInfo?"info":tab)));
   $("contwrap").hidden=tab==="movies";
   document.querySelectorAll("[data-r]").forEach(b=>b.classList.toggle("on",
     b.dataset.r==="0"?!from&&!to:from===iso(new Date(Date.now()-(+b.dataset.r-1)*864e5))&&to===iso(new Date())));
@@ -377,9 +430,8 @@ function view(first){
       +`<div class="ov"><b>${esc(a.title)}</b><small>${dur(a.secs)} · ${a.last.slice(0,10)}</small>`
       +(ks.length?`<div class="prog"><i style="width:${Math.round(dn/ks.length*100)}%"></i></div>`:"")+"</div></article>";
   }).join(""):'<p class="empty mute">Nothing matches these filters.</p>';
-  const why=s=>!inTab(s)?"in the "+(tab==="movies"?"Series":"Movies")+" tab":!keep(s,min)?"hidden: short open":!base(s)?"hidden: search/progress":((from&&s.day<from)||(to&&s.day>to))?"hidden: date range":"shown";
-  $("nrec").textContent=sessions.length;
-  $("raw").innerHTML=[...sessions].reverse().slice(0,500).map(s=>{const w=why(s);return `<div class="rr"><span>${s.opened.slice(0,10)} ${s.opened.slice(11,16)}</span><span>${esc(s.title)} · ${lab(s.season,s.ep)}</span><span>${dur(s.secs)} · ${s.pct==null?"–":Math.round(s.pct)+"%"}</span><span class="${w==="shown"?"ok":"mute"}">${w}</span></div>`}).join("");
+  const tNow=tab;
+  whyFn=s=>!inTab(s)?"in the "+(tNow==="movies"?"Series":"Movies")+" tab":!keep(s,min)?"hidden: short open":!base(s)?"hidden: search/progress":((from&&s.day<from)||(to&&s.day>to))?"hidden: date range":"shown";
   covers$($("app"));
 }
 
@@ -405,7 +457,13 @@ $("daily").addEventListener("click",e=>{
 });
 const pick=e=>{const k=e.target.closest("[data-id]")?.dataset.id;if(k)openShow(k)};
 $("list").addEventListener("click",pick);$("cont").addEventListener("click",pick);
-document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;view()});
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
+  showInfo=b.dataset.tab==="info";
+  if(!showInfo)tab=b.dataset.tab;
+  $("dash").hidden=showInfo;$("info").hidden=!showInfo;
+  if(showInfo){renderInfo();document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("on",x===b))}else view();
+});
+$("lp").onclick=()=>{postersOn=true;$("lp").classList.add("on");$("lp").textContent="Posters on";covers$($("app"))};
 $("clr").onclick=()=>{["q","from","to"].forEach(id=>$(id).value="");$("prog").value="all";view()};
 document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll("[data-mode]").forEach(x=>x.classList.toggle("on",x===b));rebuild()});
 $("mrg").onclick=()=>{mergeOn=!mergeOn;$("mrg").classList.toggle("on",mergeOn);rebuild()};
