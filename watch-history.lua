@@ -1,9 +1,15 @@
 -- watch-history.lua
 -- Appends one JSONL record per played file to ~/.config/mpv/watch-history.jsonl.
 -- Nothing touches the disk until a file closes. No playback behavior is changed.
--- Fields: filename, size_bytes, opened, closed, percent, watched_secs, folder
+-- Fields: filename, size_bytes, opened, closed, percent, duration_secs, folder
+--         (+ watched_secs only if TRACK_PLAYTIME is true)
 
 local utils = require "mp.utils"
+
+-- false = lightest: no playtime tracking at all (the dashboard can use the video
+--         runtime instead). true = also log real playing time (pauses excluded);
+--         that adds a tiny callback whenever you pause/unpause.
+local TRACK_PLAYTIME = false
 
 -- "~~/" is mpv's config directory (~/.config/mpv by default)
 local LOG_PATH = mp.command_native({"expand-path", "~~/watch-history.jsonl"})
@@ -28,10 +34,9 @@ local function parent_folder()
     return name
 end
 
--- Real playing time: counts only while the player is actually running
--- (not paused, not buffering). Only reacts to pause/unpause, no polling.
+-- Real playing time (only used when TRACK_PLAYTIME is true).
 local function tick(idle)
-    if not current then return end
+    if not TRACK_PLAYTIME or not current then return end
     local now = mp.get_time()  -- monotonic seconds
     if current.since then
         current.watched = current.watched + (now - current.since)
@@ -44,7 +49,7 @@ end
 local function close_record()
     local rec = current
     if not rec then return end
-    tick(true)        -- stop the clock
+    tick(true)        -- stop the clock (no-op unless TRACK_PLAYTIME)
     current = nil     -- clear first so a record can never be written twice
 
     local f, err = io.open(LOG_PATH, "a")
@@ -57,9 +62,11 @@ local function close_record()
     local folder = rec.folder and utils.format_json(rec.folder) or "null"
     local size   = rec.size and string.format("%.0f", rec.size) or "null"
     local pct    = rec.percent and string.format("%.0f", rec.percent) or "null"
+    local dur    = rec.duration and string.format("%.0f", rec.duration) or "null"
+    local extra  = TRACK_PLAYTIME and string.format(',"watched_secs":%.0f', rec.watched) or ""
     f:write(string.format(
-        '{"filename":%s,"size_bytes":%s,"opened":"%s","closed":"%s","percent":%s,"watched_secs":%.0f,"folder":%s}\n',
-        name, size, rec.opened, timestamp(), pct, rec.watched, folder))
+        '{"filename":%s,"size_bytes":%s,"opened":"%s","closed":"%s","percent":%s,"duration_secs":%s,"folder":%s%s}\n',
+        name, size, rec.opened, timestamp(), pct, dur, folder, extra))
     f:close()
 end
 
@@ -74,27 +81,31 @@ mp.register_event("file-loaded", function()
     end
 
     current = {
-        name    = mp.get_property("filename") or "unknown",  -- no directory part
-        folder  = parent_folder(),
-        size    = size,                                      -- nil -> null
-        opened  = timestamp(),
-        percent = nil,                                       -- filled in on unload
-        watched = 0,
-        since   = nil,
+        name     = mp.get_property("filename") or "unknown",  -- no directory part
+        folder   = parent_folder(),
+        size     = size,                                      -- nil -> null
+        duration = mp.get_property_number("duration"),        -- video runtime; nil -> null
+        opened   = timestamp(),
+        percent  = nil,                                       -- filled in on unload
+        watched  = 0,
+        since    = nil,
     }
     tick(mp.get_property_bool("core-idle", true))
 end)
 
--- core-idle is true while paused or buffering, false while playing.
-mp.observe_property("core-idle", "bool", function(_, idle)
-    if current and idle ~= nil then tick(idle) end
-end)
+if TRACK_PLAYTIME then
+    -- core-idle is true while paused or buffering, false while playing.
+    mp.observe_property("core-idle", "bool", function(_, idle)
+        if current and idle ~= nil then tick(idle) end
+    end)
+end
 
--- Runs just before the file is unloaded, while the playback position is still
--- readable. Cached in memory only; the disk is not touched here.
+-- Runs just before the file is unloaded, while position/duration are still readable.
+-- Cached in memory only; the disk is not touched here.
 mp.add_hook("on_unload", 50, function()
     if current then
         tick(true)
+        if not current.duration then current.duration = mp.get_property_number("duration") end
         local p = mp.get_property_number("percent-pos")
         if p then current.percent = math.max(0, math.min(100, p)) end
     end
