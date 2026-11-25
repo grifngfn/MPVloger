@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Watch history · build 11-25i</title>
+<style>
+:root{--bg:#f2f2f8;--card:#fff;--card2:#ececf4;--text:#17171f;--mute:#707084;--line:#dedeea;--accent:#6d5efc;--accent2:#c06cff;--ok:#16a34a;--warn:#f59e0b;--bar:rgba(242,242,248,.78);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0a10;--card:#14141d;--card2:#1d1d29;--text:#f0f0f7;--mute:#9a9ab0;--line:#262636;--accent:#8b7dff;--accent2:#ff7ad9;--ok:#4ade80;--bar:rgba(10,10,16,.75);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0a0a10;--card:#14141d;--card2:#1d1d29;--text:#f0f0f7;--mute:#9a9ab0;--line:#262636;--accent:#8b7dff;--accent2:#ff7ad9;--ok:#4ade80;--bar:rgba(10,10,16,.75);color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+*{box-sizing:border-box}
+body{margin:0;background-color:var(--bg);background-image:radial-gradient(700px 420px at 8% -80px,color-mix(in srgb,var(--accent) 26%,transparent),transparent),radial-gradient(700px 420px at 95% -120px,color-mix(in srgb,var(--accent2) 20%,transparent),transparent);background-repeat:no-repeat;color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:40;background:var(--bar);backdrop-filter:blur(16px)}
+main{max-width:1180px;margin:0 auto;padding:26px 18px 70px}
+h1{font-size:2.3rem;letter-spacing:-.03em;margin:0;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-size:1.15rem;margin:30px 0 12px;letter-spacing:-.01em}
+h3{margin:0 0 12px;font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;color:var(--mute)}
+.mute,small{color:var(--mute)}
+button,select,input{font:inherit;color:var(--text)}
+button{cursor:pointer}
+.chip,select,input{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 14px;transition:border-color .2s,background .2s,transform .15s}
+.chip:hover,select:hover,input:hover{border-color:var(--accent)}
+.chip:active{transform:scale(.96)}
+.chip.on{background:linear-gradient(90deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
+input[type=date]{padding:6px 10px}
+#drop{display:grid;place-items:center;gap:6px;text-align:center;margin-top:30px;padding:70px 20px;border:2px dashed var(--line);border-radius:26px;background:var(--card);cursor:pointer;transition:.25s}
+#drop:hover,body.drag #drop{border-color:var(--accent);transform:translateY(-3px)}
+#drop b{font-size:1.2rem}
+.panel,.tile{background:color-mix(in srgb,var(--card) 78%,transparent);border:1px solid var(--line);border-radius:20px;backdrop-filter:blur(10px)}
+.panel{padding:16px 18px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:20px 0 14px}
+.tile{padding:14px 16px;transition:transform .25s,border-color .25s}
+.tile:hover{transform:translateY(-3px);border-color:var(--accent)}
+.tile b{display:block;font-size:1.55rem;letter-spacing:-.02em;line-height:1.15}
+.tile small{display:block}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:140px}
+.col{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;min-width:0}
+.col i{display:block;width:100%;border-radius:6px 6px 2px 2px;background:linear-gradient(var(--accent2),var(--accent));transform-origin:bottom;animation:grow .7s cubic-bezier(.2,.8,.2,1) both;transition:filter .2s}
+.col:hover i{filter:brightness(1.25)}
+.col.on i{outline:2px solid var(--text);outline-offset:1px}
+.col small{font-size:.65rem;height:.9rem;white-space:nowrap}
+@keyframes grow{from{transform:scaleY(0)}}
+.row{display:grid;grid-template-columns:minmax(0,1.2fr) 2fr auto;gap:10px;align-items:center;padding:5px 0}
+.row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track,.prog{height:7px;border-radius:9px;background:var(--card2);overflow:hidden}
+.track i,.prog i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,var(--accent),var(--accent2));animation:fill .8s cubic-bezier(.2,.8,.2,1) both;transform-origin:left}
+@keyframes fill{from{transform:scaleX(0)}}
+.rail{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 12px;scroll-snap-type:x proximity}
+.cont{flex:none;width:290px;display:flex;gap:12px;align-items:center;padding:10px;scroll-snap-align:start;cursor:pointer;transition:transform .25s,border-color .25s}
+.cont:hover{transform:translateY(-3px);border-color:var(--accent)}
+.cont .cov{width:50px;height:72px}
+.cont b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}
+.next{color:var(--accent);font-weight:650;font-size:.86rem}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:8;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0;background:var(--bar);backdrop-filter:blur(16px)}
+.bar input[type=search]{flex:1 1 200px}
+.lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px}
+.poster{position:relative;aspect-ratio:2/3;border-radius:18px;overflow:hidden;cursor:pointer;border:1px solid var(--line);transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s}
+.poster:hover{transform:translateY(-6px) scale(1.02);box-shadow:0 18px 40px -16px var(--accent)}
+.poster .cov{position:absolute;inset:0;width:auto;height:auto;border-radius:0;font-size:2.2rem}
+.ov{position:absolute;inset:auto 0 0;padding:40px 12px 12px;background:linear-gradient(transparent,#000d);color:#fff;display:grid;gap:3px}
+.ov b{font-size:.95rem;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ov small{color:#ffffffbb}
+.ov .prog{background:#ffffff30;height:4px}
+.badge{position:absolute;top:10px;right:10px;padding:2px 9px;border-radius:999px;background:#000a;color:#fff;font-size:.75rem;backdrop-filter:blur(6px)}
+.anim .poster{animation:rise .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i)*25ms)}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}}
+.cov{flex:none;width:58px;height:84px;border-radius:12px;display:grid;place-items:center;font-weight:700;color:#fff;background:linear-gradient(145deg,hsl(var(--h) 60% 50%),hsl(calc(var(--h) + 45) 60% 30%)) center/cover no-repeat}
+.cov.img{color:transparent}
+#veil{position:fixed;inset:0;background:#0009;opacity:0;pointer-events:none;transition:opacity .3s;z-index:20}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);z-index:30;background:var(--card);border-left:1px solid var(--line);transform:translateX(105%);transition:transform .42s cubic-bezier(.2,.8,.2,1);overflow:auto;padding:calc(20px + env(safe-area-inset-top,0px)) 20px 30px}
+.show #veil{opacity:1;pointer-events:auto}.show #drawer{transform:none}
+#x{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:14px;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--card2);font-size:1.3rem;line-height:1}
+.dh{display:flex;gap:14px;align-items:center;margin-bottom:14px;padding-right:40px}
+.dh .cov{width:80px;height:116px}
+.dh h4{margin:0 0 4px;font-size:1.3rem;letter-spacing:-.02em}
+ul{list-style:none;margin:0;padding:0}
+li{display:grid;grid-template-columns:4.8rem 1fr 4.5rem 2.6rem;align-items:center;gap:2px 10px;padding:10px 0;border-top:1px solid var(--line)}
+.pill{justify-self:start;padding:2px 10px;border-radius:999px;background:var(--card2);font-weight:650;font-size:.8rem}
+.pc{text-align:right;font-size:.85rem}.ok{color:var(--ok);font-weight:700}
+li small{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{grid-column:1/-1;text-align:center;padding:40px 0}
+#drop.mini{margin:8px 0 0;padding:6px 16px;display:inline-flex;border-width:1px;border-radius:999px;transform:none}
+#drop.mini span{display:none}#drop.mini b{font-size:.9rem;font-weight:600}
+details>summary{cursor:pointer}
+.tabs{display:inline-flex;gap:4px;padding:4px;margin-top:16px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
+.tabs button{border:0;background:none;padding:8px 22px;border-radius:999px;transition:background .25s,color .25s}
+.tabs button:hover{background:var(--card2)}
+.tabs .on{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
+.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}.tools .tabs{margin-top:0}
+.rr{display:grid;grid-template-columns:9.5rem 1fr 8rem 12rem;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:.85rem}
+.rr span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st{position:absolute;top:10px;left:10px;padding:2px 9px;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff;font-size:.72rem}
+.edit{margin:0 0 14px;border:1px solid var(--line);border-radius:14px;padding:10px 14px;background:var(--card2)}
+.edit label{display:grid;gap:4px;margin:10px 0;color:var(--mute);font-size:.85rem}
+.edit input,.edit select,.edit textarea{width:100%;border-radius:12px;font:inherit}
+.edit textarea{background:var(--card);border:1px solid var(--line);color:var(--text);padding:8px 12px;resize:vertical}
+.erow{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.note{margin:0 0 12px;padding:8px 12px;border-left:3px solid var(--accent);color:var(--mute);white-space:pre-wrap}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<main>
+<h1>Watch history</h1>
+<p id="msg" class="mute">Your log is read and shown in this browser only; nothing is uploaded.</p>
+<p id="err" hidden style="color:#ef4444;font-weight:600"></p>
+<label id="drop"><b>Choose watch-history.jsonl</b><span class="mute">or drop it anywhere on this page</span><input id="file" type="file" accept=".jsonl,.json,.txt" hidden></label>
+<div id="app" hidden>
+<div class="tools">
+<div class="tabs"><button id="tabS" data-tab="series" class="on">Series</button><button id="tabM" data-tab="movies">Movies</button><button data-tab="info">Info</button></div>
+<div class="tabs" title="How watch time is counted"><button data-mode="played" class="on">Reported playtime</button><button data-mode="runtime">Video runtime</button><button data-mode="open">Open→close</button></div>
+<button class="chip on" id="mrg" title="Merge records of the same file opened within 3 seconds of each other">Merge double launches</button>
+<button class="chip" id="exp1">Export library CSV</button><button class="chip" id="exp2">Export sessions CSV</button><button class="chip" id="lp" title="Fetch posters from AniList / MyAnimeList (sends show titles to those sites)">Load posters</button><button class="chip" id="refresh" hidden title="Re-read the log from the server">Refresh</button>
+</div>
+<div id="dash">
+<section id="stats" class="stats"></section>
+<section class="g2">
+<div class="panel"><h3>Last 30 days · click a bar to filter</h3><div id="daily" class="bars"></div></div>
+<div class="panel"><h3>Top titles by time</h3><div id="top"></div></div>
+<div class="panel"><h3>Time of day</h3><div id="hours" class="bars"></div></div>
+<div class="panel"><h3>Weekdays</h3><div id="wk" class="bars"></div></div>
+</section>
+<div id="contwrap"><h2>Continue watching</h2><div id="cont" class="rail"></div></div>
+<h2>Library</h2>
+<div class="bar">
+<input id="q" autocomplete="off" type="search" placeholder="Search titles…">
+<button class="chip" data-r="1">Today</button><button class="chip" data-r="7">7 days</button><button class="chip" data-r="30">30 days</button><button class="chip on" data-r="0">All</button>
+<input id="from" autocomplete="off" type="date" title="From"><input id="to" autocomplete="off" type="date" title="To">
+<select id="sort" autocomplete="off"><option value="last">Recent</option><option value="secs">Most time</option><option value="title">A–Z</option></select>
+<select id="min" autocomplete="off"><option value="0">Show all opens</option><option value="30" selected>Hide under 30 s</option><option value="300">Hide under 5 min</option><option value="600">Hide under 10 min</option></select>
+<select id="prog" autocomplete="off"><option value="all">Any progress</option><option value="done">Finished</option><option value="part">Not finished</option></select><small id="hid" class="mute"></small><button class="chip" id="clr" hidden>Clear filters ✕</button>
+</div>
+<div id="list" class="lib" style="margin-top:12px"></div>
+</div>
+<section id="info" class="panel" style="margin-top:18px" hidden><div id="infoBody"></div></section>
+</div>
+</main>
+<div id="veil"></div>
+<aside id="drawer"><button id="x" aria-label="Close">×</button><div id="dbody"></div></aside>
+<script>
+const $=id=>document.getElementById(id);
+// Show any script error on the page instead of failing silently.
+const showErr=m=>{const b=$("err");b.hidden=false;b.textContent="Script error: "+m};
+addEventListener("error",e=>showErr(e.message+" (line "+e.lineno+")"));
+addEventListener("unhandledrejection",e=>showErr(String(e.reason&&e.reason.message||e.reason)));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pad=n=>String(n).padStart(2,"0");
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const dur=s=>{if(s<60)return Math.round(s)+"s";const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h}h ${pad(m)}m`:`${m}m`};
+const hue=s=>{let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))%360;return h};
+const initials=t=>t.split(/\s+/).filter(Boolean).slice(0,2).map(w=>[...w][0].toUpperCase()).join("");
+const lab=(s,e)=>e==null?"Movie":(s!=null?`S${pad(s)}`:"")+`E${pad(e)}`;
+let sessions=[],G=new Map(),tab="series",INFO={},showInfo=false,postersOn=false,whyFn=null;
+let EDITS={version:1,shows:{}},SERVER=false,SERVERINFO={},drawerId="",FIN=new Map();
+const STATUS={watching:"Watching",completed:"Completed",hold:"On hold",dropped:"Dropped",plan:"Plan to watch"};
+const totalOf=k=>{const t=EDITS.shows[k]?.total;return Number.isFinite(t)&&t>0?t:null};
+
+function parseName(fn){
+  let s=fn.replace(/\.(mkv|mp4|avi|webm|mov|m4v|ts|flv|wmv|mpe?g)$/i,"");
+  s=s.replace(/\[[^\]]*\]/g," ").replace(/\(([^)]*)\)/g,(m,x)=>/^(19|20)\d\d$/.test(x)?m:" ").replace(/\s+/g," ").trim();
+  s=/\s/.test(s)?s.replace(/_/g," "):s.replace(/[._]/g," ");
+  let season=null,ep=null,title=s,m;
+  if(m=s.match(/^(.*?)[\s.-]*\bS(\d{1,2})\s?E(\d{1,4})\b/i)){title=m[1];season=+m[2];ep=+m[3]}
+  else if(m=s.match(/^(.*?)[\s.-]*\b(\d{1,2})x(\d{2,3})\b/i)){title=m[1];season=+m[2];ep=+m[3]}
+  else if(m=s.match(/^(.*?)[\s.-]*\b(?:episode|ep\.?|e)\s?(\d{1,4})\b/i)){title=m[1];ep=+m[2]}
+  else if(m=s.match(/^(.*?)\s-\s(\d{1,4})(?:v\d)?(?:\s|$)/)){title=m[1];ep=+m[2]}
+  else title=s.replace(/\b(480p|720p|1080p|2160p|4k|x26[45]|h\.?26[45]|hevc|blu-?ray|bdrip|web-?dl|webrip|hdtv|dvdrip)\b.*$/i,"");
+  title=title.replace(/\b(?:season|s)\s?(\d{1,2})$/i,(a,x)=>{if(season==null)season=+x;return ""});
+  title=title.replace(/[\s._-]+$/,"").replace(/\s+/g," ").trim()||s||fn;
+  return {title,season,ep,key:title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,"")||fn};
+}
+
+/* Use the folder name (logged since the newer script) to fill gaps the filename leaves. */
+const GENERIC=/^(videos?|downloads?|anime|movies?|tv|shows?|series|media|specials?|home|desktop|temp)$/i;
+function withFolder(p,f){
+  if(!f)return p;
+  const sm=f.match(/^(?:season|s)\s?(\d{1,2})$/i);
+  if(sm){if(p.season==null&&p.ep!=null)p.season=+sm[1];return p}
+  if(p.ep==null&&!GENERIC.test(f)){
+    p.title=f.replace(/[_.]+/g," ").trim();
+    p.key=p.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,"")||p.key;
+  }
+  return p;
+}
+
+/* Posters: AniList first, then Jikan (MyAnimeList). Cached in this browser. */
+let covers={},covQueue=Promise.resolve();
+const covStat={ok:0,none:0,fail:0,img:0,err:""},badUrls=new Set();
+try{covers=JSON.parse(localStorage.getItem("wh-covers2")||"{}")}catch{}
+const saveCovers=()=>{try{localStorage.setItem("wh-covers2",JSON.stringify(covers))}catch{}};
+const where=()=>location.protocol==="file:"?"local file":(location.protocol==="about:"||location.protocol==="blob:")?"embedded preview (open the saved file from disk instead)":location.host||location.protocol;
+const covText=()=>`${covStat.ok} found · ${covStat.none} not found · ${covStat.fail} failed`+(covStat.img?` · ${covStat.img} images blocked`:"")
+  +(covStat.err?` · last error: ${covStat.err}`:"")+((covStat.fail||covStat.img)?` · page: ${where()}`:"");
+const covNote=()=>{const d=$("covdbg");if(d)d.textContent=covText()};
+// A result only counts if most words of our title appear in one of its titles (avoids wrong posters).
+const STOP=new Set(["and","the","of","to","no","wa","ga","a","in"]);
+const norm=t=>String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
+function match(title,names){
+  const words=norm(title).split(" ").filter(w=>w&&!STOP.has(w));
+  return words.length>0&&names.some(n=>{const c=norm(n);return words.filter(w=>c.includes(w)).length/words.length>=0.75});
+}
+// Search variants: full title, hyphens as spaces, and the part before "and/the/to/:/ - ".
+const variants=t=>[...new Set([t,t.replace(/[-_]/g," "),t.split(/\s+(?:and|the|no|to|of)\s+|:\s*|\s-\s/i)[0]].map(v=>v.trim()).filter(v=>v.length>=3))];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Returns a poster URL, "" if neither site has the title, or throws if a site could not be reached.
+async function fetchCover(t){
+  let err="";
+  for(const v of variants(t)){
+    try{
+      const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({query:"query($s:String){Page(perPage:5){media(search:$s,type:ANIME){coverImage{large} title{romaji english native} synonyms}}}",variables:{s:v}})});
+      if(r.ok){for(const m of (await r.json())?.data?.Page?.media||[]){
+        if(m.coverImage?.large&&match(t,[m.title?.romaji,m.title?.english,m.title?.native,...(m.synonyms||[])].filter(Boolean)))return m.coverImage.large}}
+      else err="AniList HTTP "+r.status;
+    }catch(e){err="AniList: "+(e.message||e);break}
+    await sleep(300);
+  }
+  for(const v of variants(t)){
+    try{
+      const r=await fetch("https://api.jikan.moe/v4/anime?limit=5&q="+encodeURIComponent(v));
+      if(r.ok){for(const m of (await r.json())?.data||[]){
+        const u=m.images?.jpg?.image_url;
+        if(u&&match(t,[m.title,m.title_english,m.title_japanese,...(m.titles||[]).map(x=>x.title)].filter(Boolean)))return u}}
+      else err+=(err?" · ":"")+"Jikan HTTP "+r.status;
+    }catch(e){err+=(err?" · ":"")+"Jikan: "+(e.message||e);break}
+    await sleep(400);
+  }
+  if(err)throw new Error(err);
+  return "";
+}
+function applyCover(el,url){
+  if(!url)return;
+  const im=new Image();
+  im.onload=()=>{el.style.backgroundImage=`url("${url}")`;el.classList.add("img")};
+  im.onerror=()=>{if(badUrls.has(url))return;badUrls.add(url);covStat.img++;covStat.err="image blocked from "+new URL(url).host;covNote()};
+  im.src=url;
+}
+function loadCover(el){
+  const k=el.dataset.k;
+  const custom=EDITS.shows[k]?.poster;
+  if(custom){applyCover(el,custom);return}
+  if(k in covers){applyCover(el,covers[k]);return}
+  if(!postersOn)return;
+  covQueue=covQueue.then(async()=>{
+    if(!el.isConnected)return;
+    if(k in covers){applyCover(el,covers[k]);return}
+    try{
+      covers[k]=await fetchCover(el.dataset.t);saveCovers();
+      covers[k]?covStat.ok++:covStat.none++;applyCover(el,covers[k]);
+    }catch(e){covStat.fail++;covStat.err=e.message||String(e)}
+    covNote();
+    await new Promise(r=>setTimeout(r,700));
+  });
+}
+$("info").addEventListener("click",e=>{
+  if(e.target.id!=="retry")return;
+  for(const k in covers)if(!covers[k])delete covers[k];
+  saveCovers();Object.assign(covStat,{none:0,fail:0,img:0,err:""});badUrls.clear();postersOn=true;view();renderInfo();
+});
+const covers$=root=>root.querySelectorAll(".cov").forEach(loadCover);
+const cov=(k,t,x="")=>`<div class="cov" data-k="${esc(k)}" data-t="${esc(t)}" style="--h:${hue(k)}">${esc(initials(t))}</div>`;
+
+let RAW=[],mode="played",mergeOn=true,merged=0,LAST={f:[],groups:[]};
+const MODES={played:"reported playtime",runtime:"video runtime",open:"open→close"};
+// Time counted per open, depending on the chosen mode (each falls back to open→close when data is missing).
+const calc=s=>mode==="played"?(s.watched??s.wall):mode==="runtime"?(s.dur!=null&&s.pct!=null?s.dur*s.pct/100:s.wall):s.wall;
+
+// Rebuild the working list: optionally merge double launches (same file, opened within 3 s), then apply the time mode.
+function rebuild(first){
+  let list=RAW.map(r=>({...r}));merged=0;
+  if(mergeOn){
+    list.sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:a.om-b.om);
+    const out=[];
+    for(const s of list){
+      const p=out[out.length-1];
+      if(p&&p.name===s.name&&s.om-p.om<=3000){
+        merged++;
+        if(s.cm>p.cm){p.cm=s.cm;p.closed=s.closed}
+        if(s.watched!=null)p.watched=Math.max(p.watched??0,s.watched);
+        if(s.pct!=null)p.pct=Math.max(p.pct??0,s.pct);
+        p.dur=p.dur??s.dur;p.wall=(p.cm-p.om)/1000;
+      }else out.push(s);
+    }
+    list=out;
+  }
+  for(const s of list){const ed=EDITS.shows[s.key];s.title0=s.title;if(ed&&ed.title)s.title=ed.title;s.secs=calc(s)}
+  sessions=list.sort((a,b)=>a.om-b.om);
+  view(first);
+  if(showInfo)renderInfo();
+}
+
+async function load(file,keep){
+  const text=await file.text();let bad=0,played=0,runtime=0,newest="";RAW=[];
+  for(const line of text.split(/\r?\n/)){
+    if(!line.trim())continue;
+    try{
+      const r=JSON.parse(line),om=Date.parse(r.opened),cm=Date.parse(r.closed);
+      if(!r.filename||!(cm>=om))throw 0;
+      const watched=typeof r.watched_secs==="number"?r.watched_secs:null;
+      const dur=typeof r.duration_secs==="number"&&r.duration_secs>0?r.duration_secs:null;
+      if(watched!=null)played++;if(dur!=null)runtime++;if(r.closed>newest)newest=r.closed;
+      const folder=typeof r.folder==="string"?r.folder:"";
+      RAW.push({...withFolder(parseName(r.filename),folder),name:r.filename,folder,opened:r.opened,closed:r.closed,om,cm,wall:(cm-om)/1000,watched,dur,
+        day:r.opened.slice(0,10),pct:typeof r.percent==="number"?r.percent:null,size:typeof r.size_bytes==="number"?r.size_bytes:0});
+    }catch{bad++}
+  }
+  INFO={file:file.name,records:RAW.length,played,runtime,newest:newest.slice(0,16).replace("T"," "),bad,found:""};
+  { // everything parsed, ignoring all filters and tabs (shown only in the Info tab)
+    const by=new Map();
+    for(const x of RAW){const k=(x.ep==null?"m:":"s:")+x.key;let a=by.get(k);if(!a)by.set(k,a={t:x.title,m:x.ep==null,e:new Set()});if(x.ep!=null)a.e.add(x.ep)}
+    INFO.found=[...by.values()].map(a=>a.m?`${a.t} (movie)`:`${a.t} (E${[...a.e].sort((p,q)=>p-q).join(", E")})`).join(" · ");
+  }
+  $("msg").hidden=true;
+  if(!keep){["q","from","to"].forEach(id=>$(id).value="");$("prog").value="all";$("min").value="30";tab="series";showInfo=false;$("dash").hidden=false;$("info").hidden=true}
+  if(SERVER)$("drop").style.display="none";else $("drop").classList.add("mini");
+  $("app").hidden=false;rebuild(!keep);
+}
+
+// CSV export (respects the current tab, filters and time mode)
+function dlCSV(name,rows){
+  const cell=v=>{if(v==null)return"";if(typeof v==="number")return String(v);let t=String(v);if(/^[=+\-@\t\r]/.test(t))t="'"+t;return /[",\r\n]/.test(t)?`"${t.replace(/"/g,'""')}"`:t};
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(cell).join(",")).join("\r\n")],{type:"text/csv"}));
+  a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+const mins=s=>Math.round(s/6)/10;
+function renderInfo(){
+  const rows=[...sessions].reverse().slice(0,500).map(s=>{const w=whyFn?whyFn(s):"";
+    return `<div class="rr"><span>${s.opened.slice(0,10)} ${s.opened.slice(11,16)}</span><span>${esc(s.title)} · ${lab(s.season,s.ep)}</span><span>${dur(s.secs)} · ${s.pct==null?"–":Math.round(s.pct)+"%"}</span><span class="${w==="shown"?"ok":"mute"}">${w}</span></div>`}).join("");
+  $("infoBody").innerHTML=`<h3>Log</h3><p>${esc(INFO.file||"")} · ${INFO.records} records · ${INFO.played} with reported playtime · ${INFO.runtime} with video runtime · newest entry ${INFO.newest}${INFO.bad?` · ${INFO.bad} skipped`:""} · ${merged} double launches merged</p>`
+    +`<h3>Found</h3><p>${esc(INFO.found)}</p>`
+    +`<h3>Posters</h3><p><span id="covdbg">${postersOn?"":"Not loaded. Press “Load posters” above. "}${covText()}</span> <button class="chip" id="retry">Retry posters</button></p>`
+    +`<h3>Page</h3><p>build 11-25i · ${where()}</p>`
+    +`<h3>Server</h3><p>${SERVER?`connected · log: ${esc(SERVERINFO.log||"")} · edits: ${esc(SERVERINFO.edits||"")} · ${Object.keys(EDITS.shows).length} shows edited`:"not connected (read-only). Start it with <code>python ~/watch-history/server.py</code> and open http://127.0.0.1:8787 to enable editing and Refresh."}</p>`
+    +`<h3>All records (${sessions.length}) and why each is shown or hidden</h3>${rows}`;
+}
+function exportLibrary(){
+  const rows=[["title","type","season","episode","sessions","time_min","best_percent","finished","last_watched","filename"]];
+  for(const a of LAST.groups)for(const e of a.eps.values())
+    rows.push([a.title,tab==="movies"?"movie":"series",e.season,e.ep,e.n,mins(e.secs),e.pct==null?null:Math.round(e.pct),e.pct==null?"unknown":e.pct>=85?"yes":"no",e.last,e.name]);
+  dlCSV("watch-library.csv",rows);
+}
+function exportSessions(){
+  const rows=[["opened","closed","title","type","season","episode","time_min","time_mode","percent","video_runtime_min","filename","folder"]];
+  for(const s of LAST.f)rows.push([s.opened,s.closed,s.title,s.ep==null?"movie":"series",s.season,s.ep,mins(s.secs),MODES[mode],
+    s.pct==null?null:Math.round(s.pct),s.dur==null?null:mins(s.dur),s.name,s.folder]);
+  dlCSV("watch-sessions.csv",rows);
+}
+
+const bars=(el,vals,labels,tips,keys,sel)=>{
+  const mx=Math.max(...vals,1);
+  el.innerHTML=vals.map((v,i)=>`<div class="col${keys&&keys[i]===sel?" on":""}"${keys?` data-d="${keys[i]}"`:""} title="${tips[i]}"><i style="height:${v?Math.max(v/mx*100,4):1}%"></i><small>${labels[i]}</small></div>`).join("");
+};
+
+// An open counts if it was long enough OR it reached the end (even if you skipped there).
+const keep=(s,min)=>s.secs>=min||(s.pct!=null&&s.pct>=85);
+function view(first){
+  document.body.classList.remove("show");
+  const q=$("q").value.trim().toLowerCase(),from=$("from").value,to=$("to").value,min=+$("min").value,prog=$("prog").value;
+  const inTab=s=>(tab==="movies")===(s.ep==null);
+  const common=s=>keep(s,min)&&(!q||s.title.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))
+    &&(prog==="all"||(s.pct!=null&&(prog==="done"?s.pct>=85:s.pct<85)));
+  const base=s=>inTab(s)&&common(s);
+  const f=sessions.filter(s=>base(s)&&(!from||s.day>=from)&&(!to||s.day<=to));
+  const sel=from&&from===to?from:"";
+  const hid=sessions.filter(s=>inTab(s)&&!keep(s,min)).length;
+  $("hid").textContent=`${f.length} opens shown`+(hid?` · ${hid} short opens hidden`:"")+(merged?` · ${merged} double launches merged`:"");
+  $("clr").hidden=!(q||from||to||prog!=="all");
+  const ser=new Set(),mov=new Set();for(const s of sessions)if(common(s))(s.ep==null?mov:ser).add(s.key);
+  $("tabS").textContent=`Series · ${ser.size}`;$("tabM").textContent=`Movies · ${mov.size}`;
+  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("on",b.dataset.tab===(showInfo?"info":tab)));
+  $("contwrap").hidden=tab==="movies";
+  document.querySelectorAll("[data-r]").forEach(b=>b.classList.toggle("on",
+    b.dataset.r==="0"?!from&&!to:from===iso(new Date(Date.now()-(+b.dataset.r-1)*864e5))&&to===iso(new Date())));
+
+  // groups
+  const g=new Map();
+  for(const s of f){
+    const id=(s.ep==null?"m:":"s:")+s.key;let a=g.get(id);if(!a)g.set(id,a={id,key:s.key,title:s.title,title0:s.title0,eps:new Map(),secs:0,last:"",n:0});
+    a.secs+=s.secs;a.n++;if(s.opened>a.last)a.last=s.opened;
+    const ek=`${s.season??""}|${s.ep??s.name}`;
+    let e=a.eps.get(ek);if(!e)a.eps.set(ek,e={season:s.season,ep:s.ep,secs:0,n:0,pct:null,last:"",name:s.name});
+    e.secs+=s.secs;e.n++;if(s.pct!=null)e.pct=Math.max(e.pct??0,s.pct);if(s.opened>e.last)e.last=s.opened;
+  }
+  const by={last:(a,b)=>b.last.localeCompare(a.last),secs:(a,b)=>b.secs-a.secs,title:(a,b)=>a.title.localeCompare(b.title)}[$("sort").value];
+  const groups=[...g.values()].sort(by);G=g;LAST={f,groups};
+
+  // stats
+  const total=f.reduce((n,s)=>n+s.secs,0),days=new Set(f.map(s=>s.day));
+  const dayT=new Map(),hrs=Array(24).fill(0),wk=Array(7).fill(0),sizes=new Map();
+  for(const s of f){
+    dayT.set(s.day,(dayT.get(s.day)||0)+s.secs);hrs[+s.opened.slice(11,13)]+=s.secs;
+    wk[(new Date(s.day+"T12:00").getDay()+6)%7]+=s.secs;if(s.size)sizes.set(s.name,s.size);
+  }
+  let cur=0,d=new Date();if(!days.has(iso(d)))d.setDate(d.getDate()-1);
+  while(days.has(iso(d))){cur++;d.setDate(d.getDate()-1)}
+  let best=0,run=0,prev=null;
+  for(const k of [...days].sort()){const t=Date.parse(k);run=prev!==null&&t-prev===864e5?run+1:1;best=Math.max(best,run);prev=t}
+  const epAll=groups.reduce((n,a)=>n+a.eps.size,0);
+  let known=0,done=0;for(const a of groups)for(const e of a.eps.values())if(e.pct!=null){known++;if(e.pct>=85)done++}
+  const topDay=[...dayT].sort((a,b)=>b[1]-a[1])[0],pk=hrs.indexOf(Math.max(...hrs));
+  const longest=f.reduce((m,s)=>Math.max(m,s.secs),0),gb=[...sizes.values()].reduce((a,b)=>a+b,0)/1e9;
+  const wn=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  $("stats").innerHTML=[
+    ["Watch time",dur(total),`${f.length} sessions · ${MODES[mode]}`],["Titles",groups.length,`${epAll} ${tab==="movies"?"files":"episodes"}`],
+    ["Active days",days.size,`${best} day best streak`],["Current streak",cur+(cur===1?" day":" days"),"ending today or yesterday"],
+    ["Avg session",f.length?dur(total/f.length):"–",`longest ${dur(longest)}`],["Busiest day",topDay?dur(topDay[1]):"–",topDay?topDay[0]:""],
+    ["Peak hour",total?`${pad(pk)}:00`:"–",total?`most on ${wn[wk.indexOf(Math.max(...wk))]}`:""],
+    ["Finished",known?Math.round(done/known*100)+"%":"–",known?`${done} of ${known} episodes`:"no progress data yet"],
+    ["Library played",gb?gb.toFixed(1)+" GB":"–","unique files"]
+  ].map(([k,v,s])=>`<div class="tile"><small>${k}</small><b>${v}</b><small>${s}</small></div>`).join("");
+
+  // charts
+  const dk=[],dv=[],dl=[],dt=[],t=new Date();
+  const bmins=new Map();for(const s of sessions)if(base(s))bmins.set(s.day,(bmins.get(s.day)||0)+s.secs);
+  for(let i=29;i>=0;i--){const x=new Date(t);x.setDate(t.getDate()-i);const k=iso(x),v=bmins.get(k)||0;
+    dk.push(k);dv.push(v);dl.push(i%5===0?x.getDate():"");dt.push(`${k} · ${v?dur(v):"nothing"}`)}
+  bars($("daily"),dv,dl,dt,dk,sel);
+  bars($("hours"),hrs,hrs.map((_,i)=>i%6===0?i:""),hrs.map((v,i)=>`${pad(i)}:00 · ${dur(v)}`));
+  bars($("wk"),wk,wn,wk.map((v,i)=>`${wn[i]} · ${dur(v)}`));
+  const top=[...groups].sort((a,b)=>b.secs-a.secs).slice(0,6),mx=top[0]?.secs||1;
+  $("top").innerHTML=top.map(a=>`<div class="row"><span>${esc(a.title)}</span><div class="track"><i style="width:${a.secs/mx*100}%"></i></div><b>${dur(a.secs)}</b></div>`).join("")||'<p class="mute">No data.</p>';
+
+  // continue watching (ignores date filter)
+  const pr=new Map();
+  for(const s of sessions){
+    if(!keep(s,min)||s.ep==null)continue;
+    const v=(s.season??0)*1e4+s.ep;let p=pr.get(s.key);
+    if(!p)pr.set(s.key,p={v:-1,last:"",title:s.title});
+    if(s.opened>p.last)p.last=s.opened;
+    if(v>p.v)Object.assign(p,{v,season:s.season,ep:s.ep,pct:s.pct});else if(v===p.v&&s.pct!=null)p.pct=Math.max(p.pct??0,s.pct);
+  }
+  const contRows=[...pr].filter(([k,p])=>{
+    const ed=EDITS.shows[k]||{},T=totalOf(k),resume=p.pct!=null&&p.pct<85;
+    return !(ed.status==="completed"||ed.status==="dropped"||(!resume&&T!=null&&p.ep>=T));
+  }).sort((a,b)=>b[1].last.localeCompare(a[1].last)).slice(0,10);
+  $("cont").innerHTML=contRows.map(([k,p])=>{
+    const T=totalOf(k),resume=p.pct!=null&&p.pct<85;
+    return `<div class="tile cont" data-id="${esc("s:"+k)}">${cov(k,p.title)}<div><b>${esc(p.title)}</b><small>last ${p.last.slice(0,10)}</small><br>`
+      +`<span class="next">${resume?"Resume ":"Next "}${lab(p.season,resume?p.ep:p.ep+1)}${T?` of ${T}`:""}</span></div></div>`;
+  }).join("")||'<p class="mute">Nothing to continue.</p>';
+
+  // finished episodes per show (ignores filters), used for "x of N" progress
+  FIN=new Map();
+  for(const s of sessions){
+    if(s.ep==null||s.pct==null||s.pct<85)continue;
+    let f=FIN.get(s.key);if(!f)FIN.set(s.key,f=new Set());f.add((s.season??0)+":"+s.ep);
+  }
+
+  // library
+  $("list").classList.toggle("anim",first===true);
+  $("list").innerHTML=groups.length?groups.map((a,i)=>{
+    const ks=[...a.eps.values()].filter(e=>e.pct!=null),dn=ks.filter(e=>e.pct>=85).length;
+    const ed=EDITS.shows[a.key]||{},T=tab==="movies"?null:totalOf(a.key),fd=FIN.get(a.key)?.size||0;
+    const bar=T?Math.min(100,Math.round(fd/T*100)):ks.length?Math.round(dn/ks.length*100):null;
+    return `<article class="poster" data-id="${esc(a.id)}" style="--i:${Math.min(i,14)}">${cov(a.key,a.title)}`
+      +`<span class="badge">${tab==="movies"?(ks.length?Math.round(Math.max(...ks.map(e=>e.pct)))+"%":"movie"):T?`${fd}/${T}`:`${a.eps.size} ep${a.eps.size>1?"s":""}`}</span>`
+      +(ed.status?`<span class="st">${esc(STATUS[ed.status]||ed.status)}</span>`:"")
+      +`<div class="ov"><b>${esc(a.title)}</b><small>${dur(a.secs)} · ${a.last.slice(0,10)}${ed.rating?` · ★ ${esc(ed.rating)}`:""}</small>`
+      +(T?`<small>${fd} of ${T} finished${fd<T?` · ${T-fd} left`:" · complete"}</small>`:"")
+      +(bar!=null?`<div class="prog"><i style="width:${bar}%"></i></div>`:"")+"</div></article>";
+  }).join(""):'<p class="empty mute">Nothing matches these filters.</p>';
+  const tNow=tab;
+  whyFn=s=>!inTab(s)?"in the "+(tNow==="movies"?"Series":"Movies")+" tab":!keep(s,min)?"hidden: short open":!base(s)?"hidden: search/progress":((from&&s.day<from)||(to&&s.day>to))?"hidden: date range":"shown";
+  covers$($("app"));
+}
+
+function editForm(a,ed){
+  if(!SERVER)return '<p class="mute"><small>Editing needs the server (see the Info tab for how to start it).</small></p>';
+  const isSeries=a.id[0]==="s";
+  const opt=Object.entries(STATUS).map(([v,l])=>`<option value="${v}"${ed.status===v?" selected":""}>${l}</option>`).join("");
+  return `<details class="edit"><summary>Edit</summary>`
+    +`<label>Display title<input id="e_title" value="${esc(ed.title||a.title)}"></label>`
+    +(isSeries?`<label>Total episodes<input id="e_total" type="number" min="1" step="1" value="${ed.total||""}"></label>`:"")
+    +`<label>Status<select id="e_status"><option value="">–</option>${opt}</select></label>`
+    +`<label>Rating (1–10)<input id="e_rating" type="number" min="1" max="10" step="0.5" value="${ed.rating||""}"></label>`
+    +`<label>Poster image URL<input id="e_poster" placeholder="https://…" value="${esc(ed.poster||"")}"></label>`
+    +`<label>Notes<textarea id="e_notes" rows="3">${esc(ed.notes||"")}</textarea></label>`
+    +`<div class="erow"><button class="chip" id="e_save">Save</button>${isSeries?`<button class="chip" id="e_done">Mark completed</button>`:""}<button class="chip" id="e_reset">Reset</button></div></details>`;
+}
+
+function openShow(k){
+  const a=G.get(k);if(!a)return;
+  drawerId=k;
+  const eps=[...a.eps.values()].sort((x,y)=>(x.season??0)-(y.season??0)||(x.ep??1e9)-(y.ep??1e9)||x.last.localeCompare(y.last));
+  const ks=eps.filter(e=>e.pct!=null),dn=ks.filter(e=>e.pct>=85).length;
+  const ed=EDITS.shows[a.key]||{},T=k[0]==="s"?totalOf(a.key):null,fd=FIN.get(a.key)?.size||0;
+  $("dbody").innerHTML=`<div class="dh">${cov(a.key,a.title)}<div><h4>${esc(a.title)}</h4><small>${eps.length} episodes · ${dur(a.secs)} · ${a.n} sessions<br>last ${a.last.slice(0,10)}${ks.length?` · ${dn} finished`:""}`
+    +`${T?`<br>${fd} of ${T} finished${fd<T?` · ${T-fd} left`:" · complete"}`:""}${ed.status?`<br>${esc(STATUS[ed.status]||ed.status)}`:""}${ed.rating?` · ★ ${esc(ed.rating)}/10`:""}</small></div></div>`
+    +(ed.notes?`<p class="note">${esc(ed.notes)}</p>`:"")+editForm(a,ed)+"<ul>"
+    +eps.map(e=>`<li><span class="pill">${lab(e.season,e.ep)}</span><span>${e.last.slice(0,10)} ${e.last.slice(11,16)}</span><span>${dur(e.secs)}${e.n>1?` · ${e.n}×`:""}</span>`
+      +`<span class="pc ${e.pct>=85?"ok":""}">${e.pct==null?"–":Math.round(e.pct)+"%"}</span><small title="${esc(e.name)}">${esc(e.name)}</small></li>`).join("")+"</ul>";
+  covers$($("dbody"));document.body.classList.add("show");
+}
+
+// Save edits to the server, then re-apply them
+async function saveEdits(){
+  try{
+    const r=await fetch("/api/edits",{method:"PUT",headers:{"Content-Type":"application/json","X-WH":"1"},body:JSON.stringify(EDITS)});
+    if(!r.ok)throw new Error("server said HTTP "+r.status);
+  }catch(e){showErr("Could not save edits: "+(e.message||e));return false}
+  rebuild();return true;
+}
+$("dbody").addEventListener("click",async e=>{
+  const id=e.target.id;
+  if(id!=="e_save"&&id!=="e_done"&&id!=="e_reset")return;
+  const a=G.get(drawerId);if(!a)return;
+  const key=a.key;let ed={...(EDITS.shows[key]||{})};
+  if(id==="e_reset")ed={};
+  else if(id==="e_save"){
+    const v=n=>$(n)?$(n).value.trim():"";
+    const title=v("e_title"),total=Math.round(+v("e_total")),rating=+v("e_rating"),poster=v("e_poster");
+    ed={};
+    if(title&&title!==a.title0)ed.title=title;
+    if(total>0)ed.total=total;
+    if(v("e_status"))ed.status=v("e_status");
+    if(rating>0&&rating<=10)ed.rating=rating;
+    if(/^https?:\/\//i.test(poster))ed.poster=poster;
+    if(v("e_notes"))ed.notes=v("e_notes");
+  }else{ // mark completed: total = highest episode seen (unless you already set one)
+    let hi=0;for(const s of sessions)if(s.key===key&&s.ep!=null&&s.ep>hi)hi=s.ep;
+    if(!ed.total&&hi)ed.total=hi;
+    ed.status="completed";
+  }
+  if(Object.keys(ed).length)EDITS.shows[key]=ed;else delete EDITS.shows[key];
+  if(await saveEdits())openShow(drawerId);
+});
+
+$("file").addEventListener("change",async e=>{const f=e.target.files[0];if(f)await load(f);e.target.value=""});
+["q","from","to","min","prog","sort"].forEach(id=>$(id).addEventListener("input",()=>view()));
+document.querySelectorAll("[data-r]").forEach(b=>b.onclick=()=>{
+  const r=+b.dataset.r,d=new Date(Date.now()-(r-1)*864e5);
+  $("from").value=r?iso(d):"";$("to").value=r?iso(new Date()):"";view();
+});
+$("daily").addEventListener("click",e=>{
+  const d=e.target.closest(".col")?.dataset.d;if(!d)return;
+  const on=$("from").value===d&&$("to").value===d;$("from").value=$("to").value=on?"":d;view();
+});
+const pick=e=>{const k=e.target.closest("[data-id]")?.dataset.id;if(k)openShow(k)};
+$("list").addEventListener("click",pick);$("cont").addEventListener("click",pick);
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
+  showInfo=b.dataset.tab==="info";
+  if(!showInfo)tab=b.dataset.tab;
+  $("dash").hidden=showInfo;$("info").hidden=!showInfo;
+  if(showInfo){renderInfo();document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("on",x===b))}else view();
+});
+$("lp").onclick=()=>{postersOn=true;$("lp").classList.add("on");$("lp").textContent="Posters on";covers$($("app"))};
+$("clr").onclick=()=>{["q","from","to"].forEach(id=>$(id).value="");$("prog").value="all";view()};
+document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll("[data-mode]").forEach(x=>x.classList.toggle("on",x===b));rebuild()});
+$("mrg").onclick=()=>{mergeOn=!mergeOn;$("mrg").classList.toggle("on",mergeOn);rebuild()};
+$("exp1").onclick=exportLibrary;$("exp2").onclick=exportSessions;
+$("veil").onclick=$("x").onclick=()=>document.body.classList.remove("show");
+addEventListener("keydown",e=>e.key==="Escape"&&document.body.classList.remove("show"));
+addEventListener("dragover",e=>{e.preventDefault();document.body.classList.add("drag")});
+addEventListener("dragleave",()=>document.body.classList.remove("drag"));
+addEventListener("drop",e=>{e.preventDefault();document.body.classList.remove("drag");e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])});
+
+// Server mode: if this page is served by server.py, read the log live and enable editing.
+async function loadFromServer(keep){
+  const r=await fetch("/api/log",{cache:"no-store"});
+  if(!r.ok){let m="";try{m=(await r.json()).error}catch{}throw new Error(m||"HTTP "+r.status)}
+  const text=await r.text();
+  await load({name:"watch-history.jsonl",text:async()=>text},keep);
+}
+$("refresh").onclick=()=>loadFromServer(true).catch(e=>showErr("Could not read the log: "+(e.message||e)));
+(async()=>{
+  if(!/^https?:$/.test(location.protocol))return;
+  try{
+    const r=await fetch("/api/info",{cache:"no-store"});
+    if(!r.ok)return;
+    const info=await r.json();
+    if(!info||info.server!==true)return;
+    SERVER=true;SERVERINFO=info;
+    const e=await fetch("/api/edits",{cache:"no-store"});
+    if(e.ok){const d=await e.json();if(d&&d.shows)EDITS=d}
+    $("drop").style.display="none";$("refresh").hidden=false;
+    await loadFromServer(false);
+  }catch(e){if(SERVER)showErr("Could not read the log: "+(e.message||e))}
+})();
+</script>
+</body>
+</html>
