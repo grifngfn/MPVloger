@@ -53,7 +53,7 @@ local function close_record()
         return
     end
 
-    local name   = utils.format_json(rec.name) or '\"\"'  -- handles JSON escaping
+    local name   = utils.format_json(rec.name) or '""'  -- handles JSON escaping
     local folder = rec.folder and utils.format_json(rec.folder) or "null"
     local size   = rec.size and string.format("%.0f", rec.size) or "null"
     local pct    = rec.percent and string.format("%.0f", rec.percent) or "null"
