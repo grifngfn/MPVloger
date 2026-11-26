@@ -3,7 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Watch history · build 11-26b</title>
+<title>MPVloger · Watch history · build 11-26d</title>
+<script>
+/* Looks: <html data-look="id">. Set here, before the first paint, so there is no flash of the default look. */
+(function(){var d=document.documentElement,l="violet";
+try{l=localStorage.getItem("mpvloger.look")||l}catch(e){}
+if(!/^[a-z0-9-]{1,32}$/.test(l))l="violet";
+window.applyLook=function(x){d.dataset.look=x;if(x==="violet")delete d.dataset.plain;else d.dataset.plain="1"};
+applyLook(l)})();
+</script>
 <style>
 :root{--bg:#f2f2f8;--card:#fff;--card2:#ececf4;--text:#17171f;--mute:#707084;--line:#dedeea;--accent:#6d5efc;--accent2:#c06cff;--ok:#16a34a;--warn:#f59e0b;--bar:rgba(242,242,248,.78);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0a10;--card:#14141d;--card2:#1d1d29;--text:#f0f0f7;--mute:#9a9ab0;--line:#262636;--accent:#8b7dff;--accent2:#ff7ad9;--ok:#4ade80;--bar:rgba(10,10,16,.75);color-scheme:dark}}
@@ -100,11 +108,66 @@ details>summary{cursor:pointer}
 .erow{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
 .note{margin:0 0 12px;padding:8px 12px;border-left:3px solid var(--accent);color:var(--mute);white-space:pre-wrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+
+/* ===================== LOOKS =====================
+   A look is chosen with <html data-look="id"> (the select#look in the header; "violet" is the original design).
+   Every look except violet is also "plain" (<html data-plain>): no blur, no animations, no gradient backdrop.
+   That is done once, below, so a new look cannot slow the page down.
+
+   To add a look:
+     1. Add <option value="id">Look · Name</option> to select#look in the header.
+     2. Add a block like the two below: a palette (the variables) and, if you want, a few overrides.
+        Keep every rule under html[data-look="id"] so it can never touch the other looks.
+   Variables: --bg --card --card2 --text --mute --line --accent --accent2 --ok --warn
+              --bar (solid colour of the sticky bars) --on-accent (text colour on top of --accent)
+   Layout hooks: .lib (library grid)  .poster (one show)  .cov (cover)  .ov (title and progress)  .badge  .st  .panel  .tile */
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+
+/* shared by every look except violet */
+html[data-plain] body{background-image:none}
+html[data-plain] body::before{backdrop-filter:none}
+html[data-plain] :is(.bar,.panel,.tile,.badge){backdrop-filter:none}
+html[data-plain] :is(.panel,.tile){background:var(--card)}
+html[data-plain] .bar{background:var(--bar)}
+html[data-plain] :is(.col i,.track i,.prog i,.anim .poster){animation:none}
+html[data-plain] :is(.chip.on,.tabs .on,.st){background:var(--accent);color:var(--on-accent,#fff)}
+html[data-plain] h1{background:none;color:var(--accent)}
+html[data-plain] .poster:hover{box-shadow:none}
+
+/* ---- Paper: warm light, serif headings, flat catalogue cards (title under the cover) ---- */
+html:root[data-look="paper"]{--bg:#f6f1e7;--card:#fffdf8;--card2:#efe7d6;--text:#2b2620;--mute:#7a6f5f;--line:#ddd1ba;--accent:#b4572a;--accent2:#d98e3f;--ok:#4d7c3a;--warn:#c2810c;--bar:#f6f1e7;--on-accent:#fff;--serif:Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;color-scheme:light}
+html[data-look="paper"] h1{color:var(--text)}
+html[data-look="paper"] :is(h1,h2,.tile b,.dh h4){font-family:var(--serif)}
+html[data-look="paper"] :is(.panel,.tile,.chip,select,input,#drop){border-radius:6px}
+html[data-look="paper"] .poster{aspect-ratio:auto;display:flex;flex-direction:column;border-radius:6px;background:var(--card)}
+html[data-look="paper"] .poster .cov{position:static;width:100%;height:auto;aspect-ratio:2/3;border-radius:0}
+html[data-look="paper"] .ov{position:static;background:none;color:var(--text);padding:10px 12px 12px}
+html[data-look="paper"] .ov small{color:var(--mute)}
+html[data-look="paper"] .ov .prog{background:var(--card2)}
+
+/* ---- Terminal: dark, monospace, compact list instead of the poster grid ---- */
+html:root[data-look="terminal"]{--bg:#0b0f0c;--card:#111813;--card2:#18221b;--text:#d7f5df;--mute:#6f9a7d;--line:#1f3326;--accent:#39d98a;--accent2:#f5c542;--ok:#39d98a;--warn:#f5c542;--bar:#0b0f0c;--on-accent:#04120a;--mono:ui-monospace,"SF Mono","JetBrains Mono","DejaVu Sans Mono",Menlo,Consolas,monospace;color-scheme:dark}
+html[data-look="terminal"] body{font-family:var(--mono);font-size:14px}
+html[data-look="terminal"] h1::before{content:"$ ";color:var(--mute)}
+html[data-look="terminal"] :is(h1,.tile b){letter-spacing:0}
+html[data-look="terminal"] :is(.panel,.tile,.chip,select,input,#drop){border-radius:3px}
+html[data-look="terminal"] .lib{grid-template-columns:1fr;gap:0;border-top:1px solid var(--line)}
+html[data-look="terminal"] .poster{aspect-ratio:auto;display:grid;grid-template-columns:40px minmax(0,1fr) auto;grid-template-areas:"c o b" "c o s";column-gap:12px;align-items:center;padding:6px 8px;border:0;border-bottom:1px solid var(--line);border-radius:0;overflow:visible}
+html[data-look="terminal"] .poster:hover{transform:none;background:var(--card2)}
+html[data-look="terminal"] .poster .cov{grid-area:c;position:static;width:40px;height:56px;border-radius:3px;font-size:.9rem}
+html[data-look="terminal"] .ov{grid-area:o;position:static;background:none;color:var(--text);padding:0}
+html[data-look="terminal"] .ov small{color:var(--mute)}
+html[data-look="terminal"] .ov b{-webkit-line-clamp:1}
+html[data-look="terminal"] .ov .prog{background:var(--card2);height:3px}
+html[data-look="terminal"] .badge{grid-area:b;position:static;justify-self:end;padding:0;background:none;color:var(--accent);font-size:.85rem}
+html[data-look="terminal"] .st{grid-area:s;position:static;justify-self:end;font-size:.7rem}
 </style>
 </head>
 <body>
 <main>
-<h1>Watch history</h1>
+<div class="top"><div><h1>MPVloger</h1>
+<p class="mute" style="margin:2px 0 0;font-weight:600">Watch history</p></div>
+<select id="look" aria-label="Look" title="Change the look of the page"><option value="violet">Look · Violet</option><option value="paper">Look · Paper</option><option value="terminal">Look · Terminal</option></select></div>
 <p id="msg" class="mute">Your log is read and shown in this browser only; nothing is uploaded.</p>
 <p id="err" hidden style="color:#ef4444;font-weight:600"></p>
 <p id="dbnote" hidden class="mute" style="font-weight:600"></p>
@@ -403,7 +466,7 @@ function renderInfo(){
   $("infoBody").innerHTML=`<h3>Log</h3><p>${esc(INFO.file||"")} · ${INFO.records} records · ${INFO.played} with reported playtime · ${INFO.runtime} with video runtime · newest entry ${INFO.newest}${INFO.bad?` · ${INFO.bad} skipped`:""} · ${merged} double launches merged</p>`
     +`<h3>Found</h3><p>${esc(INFO.found)}</p>`
     +`<h3>Posters</h3><p><span id="covdbg">${postersOn?"":"Not loaded. Press “Load posters” above. "}${covText()}</span> <button class="chip" id="retry">Retry posters</button></p>`
-    +`<h3>Page</h3><p>build 11-26b · ${where()}</p>`
+    +`<h3>Page</h3><p>build 11-26d · ${where()}</p>`
     +`<h3>Server</h3><p>${SERVER?`connected · database: ${esc(SERVERINFO.db||"")} · log (read-only): ${esc(SERVERINFO.log||"")} · ${SYNC.total??"?"} sessions stored (${SYNC.added??0} new this sync${SYNC.bad?`, ${SYNC.bad} skipped lines`:""}) · ${Object.keys(EDITS.shows).length} shows edited <button class="chip" data-act="rebuild">Rebuild from log</button>`:"not connected (read-only). Start it with <code>python ~/watch-history/server.py</code> and open http://127.0.0.1:8787 to enable editing and Refresh, or open this file straight from disk and choose watch-history.jsonl (read-only)."}</p>`
     +`<h3>All records (${sessions.length}) and why each is shown or hidden</h3>${rows}`;
 }
@@ -648,6 +711,27 @@ addEventListener("dragover",e=>{e.preventDefault();document.body.classList.add("
 addEventListener("dragleave",()=>document.body.classList.remove("drag"));
 addEventListener("drop",e=>{e.preventDefault();document.body.classList.remove("drag");e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])});
 
+// Looks: the options of select#look decide what exists (see the LOOKS comment in the CSS).
+// The choice is kept in the browser, and in the database when the server runs.
+function saveLook(l){
+  try{localStorage.setItem("mpvloger.look",l)}catch{}
+  if(SERVER)fetch("/api/prefs",{method:"PUT",headers:{"Content-Type":"application/json","X-WH":"1"},body:JSON.stringify({look:l})}).catch(()=>{});
+}
+const lookSel=$("look");
+{
+  let cur=document.documentElement.dataset.look;
+  if(![...lookSel.options].some(o=>o.value===cur)){cur="violet";applyLook(cur)}
+  lookSel.value=cur;
+  lookSel.onchange=()=>{applyLook(lookSel.value);saveLook(lookSel.value)};
+}
+async function syncLookFromServer(){
+  const r=await fetch("/api/prefs",{cache:"no-store"});if(!r.ok)return;
+  const d=await r.json();
+  if(d&&[...lookSel.options].some(o=>o.value===d.look)){
+    if(d.look!==lookSel.value){lookSel.value=d.look;applyLook(d.look);try{localStorage.setItem("mpvloger.look",d.look)}catch{}}
+  }else if(lookSel.value!=="violet")saveLook(lookSel.value);
+}
+
 // Server mode: if this page is served by server.py, read the log live and enable editing.
 async function post(path){
   const r=await fetch(path,{method:"POST",headers:{"X-WH":"1"}});
@@ -689,6 +773,7 @@ $("refresh").onclick=()=>loadFromServer(true).catch(e=>showErr("Could not read t
     SERVER=true;SERVERINFO=info;
     const e=await fetch("/api/edits",{cache:"no-store"});
     if(e.ok){const d=await e.json();if(d&&d.shows)EDITS=d}
+    try{await syncLookFromServer()}catch{}
     $("drop").style.display="none";$("refresh").hidden=false;
     await loadFromServer(false);
   }catch(e){if(SERVER)showErr("Could not read the log: "+(e.message||e))}

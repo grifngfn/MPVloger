@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-watch-history server
+MPVloger · watch-history server
 
   * serves dashboard.html (it must sit next to this file)
   * reads your mpv log, strictly read-only:  ~/.config/mpv/watch-history.jsonl
@@ -26,6 +26,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -441,6 +442,10 @@ class Handler(BaseHTTPRequestHandler):
                     after = 0
                 epoch = q.get("epoch", [""])[0] or None
                 return self._send(200, sessions_since(after, epoch))
+            if path == "/api/prefs":
+                with LOCK:
+                    look = meta_get("look")
+                return self._send(200, {"look": look or None})
             if path == "/api/edits":
                 return self._send(200, load_edits())
         except (sqlite3.Error, OSError) as e:
@@ -465,7 +470,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         if not self._guard():
             return
-        if urlsplit(self.path).path != "/api/edits":
+        path = urlsplit(self.path).path
+        if path not in ("/api/edits", "/api/prefs"):
             return self._send(404, {"error": "not found"})
         if not self._write_ok():
             return
@@ -476,9 +482,20 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             return self._send(413, {"error": "bad size"})
         try:
-            data = clean_edits(json.loads(self.rfile.read(length).decode("utf-8")))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            data = None
+            body = None
+        if path == "/api/prefs":  # the page's look: any id of letters, digits and dashes, so new looks need no server change
+            look = body.get("look") if isinstance(body, dict) else None
+            if not (isinstance(look, str) and re.fullmatch(r"[a-z0-9-]{1,32}", look)):
+                return self._send(400, {"error": "invalid look"})
+            try:
+                with tx():
+                    meta_set("look", look)
+            except sqlite3.Error as e:
+                return self._send(500, {"error": str(e)})
+            return self._send(200, {"ok": True})
+        data = clean_edits(body)
         if data is None:
             return self._send(400, {"error": "invalid edits"})
         try:
@@ -512,7 +529,7 @@ def main():
         sys.exit(f"cannot listen on port {args.port}: {e}")
     srv.port = args.port
     url = f"http://127.0.0.1:{args.port}"
-    print(f"watch-history running at {url}")
+    print(f"MPVloger (watch history) running at {url}")
     print(f"  log (read-only): {LOG}")
     print(f"  database:        {DB_PATH}")
     print("  stop with Ctrl+C")
