@@ -22,6 +22,7 @@ Fallback without the server: open dashboard.html straight from disk and choose t
 """
 import argparse
 import datetime
+import difflib
 import hashlib
 import json
 import math
@@ -31,11 +32,14 @@ import secrets
 import sqlite3
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
 import webbrowser
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 HERE = Path(__file__).resolve().parent
 LOG = Path(os.environ.get("WH_LOG", "~/.config/mpv/watch-history.jsonl")).expanduser()
@@ -48,6 +52,7 @@ DB = None
 LOCK = threading.RLock()  # one connection, shared by the request threads, always used under this lock
 
 STATUSES = {"watching", "completed", "hold", "dropped", "plan"}
+KINDS = {"anime", "kdrama", "cdrama", "jdrama", "western", "other"}
 FIELDS = {  # allowed per-show fields and their types
     "title": str,
     "total": int,
@@ -55,6 +60,7 @@ FIELDS = {  # allowed per-show fields and their types
     "rating": (int, float),
     "poster": str,
     "notes": str,
+    "kind": str,
 }
 STAMPS = ("rev", "updated")  # owned by the server; anything the browser sends for these is ignored
 
@@ -68,13 +74,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE TABLE IF NOT EXISTS shows (
   key TEXT PRIMARY KEY,
-  title TEXT, total INTEGER, status TEXT, rating REAL, poster TEXT, notes TEXT,
+  title TEXT, total INTEGER, status TEXT, rating REAL, poster TEXT, notes TEXT, kind TEXT,
   rev INTEGER NOT NULL, updated TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS manual_eps (
   show_key TEXT NOT NULL, season INTEGER NOT NULL, ep INTEGER NOT NULL,
   added_rev INTEGER NOT NULL, added TEXT NOT NULL,
   PRIMARY KEY (show_key, season, ep)
+);
+CREATE TABLE IF NOT EXISTS lookups (
+  key TEXT PRIMARY KEY, kind TEXT NOT NULL, source TEXT NOT NULL, matched TEXT NOT NULL DEFAULT '',
+  score REAL NOT NULL DEFAULT 0, confident INTEGER NOT NULL DEFAULT 0, looked_up TEXT NOT NULL
 );
 """
 
@@ -88,6 +98,8 @@ def open_db():
     DB.execute("PRAGMA journal_mode=WAL")
     DB.execute("PRAGMA synchronous=NORMAL")
     DB.executescript(SCHEMA)
+    if "kind" not in [r[1] for r in DB.execute("PRAGMA table_info(shows)")]:  # database made before types existed
+        DB.execute("ALTER TABLE shows ADD COLUMN kind TEXT")
     if not meta_get("epoch"):
         meta_set("epoch", secrets.token_hex(4))
 
@@ -308,6 +320,8 @@ def clean_edits(data):
                     continue
                 if field == "status" and v not in STATUSES:
                     continue
+                if field == "kind" and v not in KINDS:
+                    continue
             if field == "total" and v < 1:
                 continue
             if field == "rating" and not 0 < v <= 10:
@@ -325,11 +339,11 @@ def load_edits():
     """The edits in the shape the dashboard uses: {"version", "rev", "shows": {key: {...}}}."""
     with LOCK:
         shows = {}
-        for key, title, total, status, rating, poster, notes, rev, updated in DB.execute(
-                "SELECT key, title, total, status, rating, poster, notes, rev, updated FROM shows"):
+        for key, title, total, status, rating, poster, notes, kind, rev, updated in DB.execute(
+                "SELECT key, title, total, status, rating, poster, notes, kind, rev, updated FROM shows"):
             item = {}
             for name, val in (("title", title), ("total", total), ("status", status),
-                              ("rating", rating), ("poster", poster), ("notes", notes)):
+                              ("rating", rating), ("poster", poster), ("notes", notes), ("kind", kind)):
                 if val is not None:
                     item[name] = val
             item["rev"] = rev
@@ -359,13 +373,13 @@ def put_edits(new):
         for key in changed:
             item = data["shows"][key]
             DB.execute(
-                "INSERT INTO shows (key, title, total, status, rating, poster, notes, rev, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
+                "INSERT INTO shows (key, title, total, status, rating, poster, notes, kind, rev, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
                 "title = excluded.title, total = excluded.total, status = excluded.status, "
-                "rating = excluded.rating, poster = excluded.poster, notes = excluded.notes, "
+                "rating = excluded.rating, poster = excluded.poster, notes = excluded.notes, kind = excluded.kind, "
                 "rev = excluded.rev, updated = excluded.updated",
                 (key, item.get("title"), item.get("total"), item.get("status"), item.get("rating"),
-                 item.get("poster"), item.get("notes"), item["rev"], item["updated"]))
+                 item.get("poster"), item.get("notes"), item.get("kind"), item["rev"], item["updated"]))
             have = {(s, e) for s, e in DB.execute("SELECT season, ep FROM manual_eps WHERE show_key = ?", (key,))}
             want = {(int(s), e) for s, eps in item.get("manual", {}).items() for e in eps}
             for s, e in have - want:
@@ -374,6 +388,222 @@ def put_edits(new):
                 DB.execute("INSERT INTO manual_eps (show_key, season, ep, added_rev, added) VALUES (?, ?, ?, ?, ?)",
                            (key, s, e, item["rev"], item["updated"]))
         meta_set("rev", data["rev"])
+
+
+# ---------------------------------------------------------------- online type lookup (only when you ask for it)
+# Sends only a cleaned title and year to the sources you switched on. Never filenames, folders or watch data.
+# APIs (checked Nov 2026): AniList GraphQL (no key, may be limited to 30 requests/min), TVmaze /search/shows
+# (no key, 20 calls/10 s), TMDB /3/search/tv (free key: "API Read Access Token" as Bearer, or the older v3 api_key).
+UA = "MPVloger"
+SOURCES = ("anilist", "tmdb", "tvmaze")  # order tried
+GAP = {"anilist": 2.1, "tmdb": 0.3, "tvmaze": 0.6}  # seconds between calls
+MAX_ITEMS = 10  # titles per detect call
+ANILIST_Q = ("query($s:String){Media(search:$s,type:ANIME){title{romaji english} synonyms "
+             "startDate{year} countryOfOrigin}}")
+
+
+class RateLimited(Exception):
+    pass
+
+
+def _fetch(url, payload=None, headers=None):
+    h = {"User-Agent": UA, "Accept": "application/json"}
+    h.update(headers or {})
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        h["Content-Type"] = "application/json"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=h), timeout=12) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RateLimited() from e
+        if e.code == 404:  # AniList answers "no match" with a 404
+            return {}
+        raise
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", str(s).lower()).strip()
+
+
+def _sim(a, b):
+    a, b = _norm(a), _norm(b)
+    return difflib.SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _year_ok(want, got):
+    return want is None or got is None or abs(want - got) <= 1
+
+
+def _year_of(text):
+    return int(text[:4]) if isinstance(text, str) and text[:4].isdigit() else None
+
+
+def _kind_from(country, language, animation):
+    c, lang = (country or "").upper(), (language or "").lower()
+    if c == "KR" or lang in ("ko", "korean"):
+        return "kdrama"
+    if c in ("CN", "TW", "HK") or lang in ("zh", "cn", "chinese", "mandarin", "cantonese"):
+        return "anime" if animation else "cdrama"
+    if c == "JP" or lang in ("ja", "japanese"):
+        return "anime" if animation else "jdrama"
+    return "western"
+
+
+def look_anilist(title, year, key):
+    m = (_fetch("https://graphql.anilist.co", {"query": ANILIST_Q, "variables": {"s": title}}).get("data") or {}).get("Media")
+    if not m:
+        return None
+    t = m.get("title") or {}
+    names = [n for n in [t.get("romaji"), t.get("english")] + list(m.get("synonyms") or []) if isinstance(n, str) and n]
+    if not names:
+        return None
+    best = max(names, key=lambda n: _sim(title, n))
+    return "anime", best, _sim(title, best), (m.get("startDate") or {}).get("year")
+
+
+def look_tvmaze(title, year, key):
+    res = _fetch("https://api.tvmaze.com/search/shows?" + urlencode({"q": title}))
+    best = None
+    for r in (res if isinstance(res, list) else [])[:5]:
+        s = r.get("show") or {}
+        sc = _sim(title, s.get("name", ""))
+        if best is None or sc > best[0]:
+            best = (sc, s)
+    if not best:
+        return None
+    sc, s = best
+    ch = s.get("network") or s.get("webChannel") or {}
+    kind = _kind_from((ch.get("country") or {}).get("code"), s.get("language"), s.get("type") == "Animation")
+    return kind, s.get("name", ""), sc, _year_of(s.get("premiered"))
+
+
+def look_tmdb(title, year, key):
+    q = {"query": title, "include_adult": "false", "language": "en-US", "page": "1"}
+    headers = {}
+    if key.startswith("eyJ"):  # API Read Access Token (TMDB's default)
+        headers["Authorization"] = "Bearer " + key
+    else:  # older v3 API key
+        q["api_key"] = key
+    res = _fetch("https://api.themoviedb.org/3/search/tv?" + urlencode(q), headers=headers)
+    best = None
+    for r in (res.get("results") or [])[:5]:
+        sc = max(_sim(title, r.get("name", "")), _sim(title, r.get("original_name", "")))
+        if best is None or sc > best[0]:
+            best = (sc, r)
+    if not best:
+        return None
+    sc, r = best
+    kind = _kind_from((r.get("origin_country") or [None])[0], r.get("original_language"), 16 in (r.get("genre_ids") or []))
+    return kind, r.get("name", ""), sc, _year_of(r.get("first_air_date"))
+
+
+def lookup_settings():
+    """Settings and saved lookups for the page. The TMDB key itself is never sent back."""
+    cols = ("key", "kind", "source", "matched", "score", "confident", "looked_up")
+    with LOCK:
+        try:
+            src = json.loads(meta_get("lookup_sources") or "{}")
+            skip = json.loads(meta_get("lookup_skip") or "[]")
+        except ValueError:
+            src, skip = {}, []
+        has_key = bool(meta_get("tmdb_key"))
+        rows = DB.execute("SELECT " + ", ".join(cols) + " FROM lookups").fetchall()
+    src = src if isinstance(src, dict) else {}
+    skip = skip if isinstance(skip, list) else []
+    return {"sources": {"anilist": src.get("anilist") is not False, "tvmaze": src.get("tvmaze") is not False,
+                        "tmdb": bool(src.get("tmdb")) and has_key},
+            "tmdb_key_set": has_key, "skip": [k for k in skip if isinstance(k, str)],
+            "lookups": [dict(zip(cols, r)) for r in rows]}
+
+
+def save_lookup_settings(body):
+    if not isinstance(body, dict):
+        raise ValueError("invalid settings")
+    with tx():
+        if isinstance(body.get("sources"), dict):
+            try:
+                cur = json.loads(meta_get("lookup_sources") or "{}")
+            except ValueError:
+                cur = {}
+            cur = cur if isinstance(cur, dict) else {}
+            for n in SOURCES:
+                if isinstance(body["sources"].get(n), bool):
+                    cur[n] = body["sources"][n]
+            meta_set("lookup_sources", json.dumps(cur))
+        k = body.get("tmdb_key")
+        if isinstance(k, str):
+            k = k.strip()
+            if k and not re.fullmatch(r"[A-Za-z0-9._-]{16,800}", k):
+                raise ValueError("That does not look like a TMDB key or access token.")
+            meta_set("tmdb_key", k)
+        if isinstance(body.get("skip"), list):
+            keys = {s for s in body["skip"] if isinstance(s, str) and 0 < len(s) <= 300}
+            meta_set("lookup_skip", json.dumps(sorted(keys)[:5000]))
+
+
+def clean_items(body):
+    """[{key, title, year}] from the page; anything else is dropped. Returns None if unusable."""
+    items = body.get("items") if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        return None
+    out = []
+    for it in items[:MAX_ITEMS]:
+        if not isinstance(it, dict):
+            continue
+        key, title, year = it.get("key"), it.get("title"), it.get("year")
+        if not (isinstance(key, str) and 0 < len(key) <= 300 and isinstance(title, str) and 0 < len(title.strip()) <= 200):
+            continue
+        ok = isinstance(year, int) and not isinstance(year, bool) and 1900 <= year <= 2100
+        out.append({"key": key, "title": title.strip(), "year": year if ok else None})
+    return out
+
+
+def detect(items):
+    """Look the titles up in the sources that are switched on; save and return what was found."""
+    st = lookup_settings()
+    order = [n for n in SOURCES if st["sources"].get(n)]
+    if not order:
+        return {"results": [], "errors": ["No source is switched on."]}
+    with LOCK:
+        key = meta_get("tmdb_key")
+    funcs = {"anilist": look_anilist, "tmdb": look_tmdb, "tvmaze": look_tvmaze}
+    out, errors, stop = [], [], False
+    for it in items:
+        best = None  # (confident, score, kind, source, matched)
+        for name in order:
+            try:
+                r = funcs[name](it["title"], it["year"], key)
+            except RateLimited:
+                errors.append(f"{name} is limiting requests. Wait a minute and try again.")
+                stop = True
+                break
+            except (OSError, ValueError) as e:  # network trouble, bad answer, bad key (HTTP 401)
+                errors.append(f"{name}: {e}")
+                continue
+            finally:
+                time.sleep(GAP[name])
+            if r:
+                kind, matched, score, got = r
+                cand = (score >= 0.88 and _year_ok(it["year"], got), score, kind, name, matched)
+                if best is None or cand[:2] > best[:2]:
+                    best = cand
+                if cand[0]:
+                    break
+        if stop:
+            break
+        out.append({"key": it["key"], "kind": best[2] if best else "unknown", "source": best[3] if best else "",
+                    "matched": best[4] if best else "", "score": round(best[1], 2) if best else 0,
+                    "confident": bool(best and best[0])})
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    with tx():
+        for r in out:
+            DB.execute("INSERT OR REPLACE INTO lookups (key, kind, source, matched, score, confident, looked_up) "
+                       "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (r["key"], r["kind"], r["source"], r["matched"], r["score"], int(r["confident"]), now))
+    return {"results": out, "errors": sorted(set(errors))}
 
 
 # ---------------------------------------------------------------- HTTP
@@ -419,6 +649,15 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _read_json(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if 0 < length <= MAX_BODY:
+                return json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            pass
+        return None
+
     def do_GET(self):
         if not self._guard():
             return
@@ -446,6 +685,8 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     look = meta_get("look")
                 return self._send(200, {"look": look or None})
+            if path == "/api/types":
+                return self._send(200, lookup_settings())
             if path == "/api/edits":
                 return self._send(200, load_edits())
         except (sqlite3.Error, OSError) as e:
@@ -456,11 +697,20 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = urlsplit(self.path).path
-        if path not in ("/api/sync", "/api/rebuild"):
+        if path not in ("/api/sync", "/api/rebuild", "/api/types/detect", "/api/types/forget"):
             return self._send(404, {"error": "not found"})
         if not self._write_ok():
             return
         try:
+            if path == "/api/types/forget":
+                with tx():
+                    DB.execute("DELETE FROM lookups")
+                return self._send(200, lookup_settings())
+            if path == "/api/types/detect":
+                items = clean_items(self._read_json())
+                if items is None:
+                    return self._send(400, {"error": "invalid titles"})
+                return self._send(200, detect(items))
             self._send(200, sync(rebuild=(path == "/api/rebuild")))
         except FileNotFoundError:
             self._send(404, {"error": f"log not found: {LOG}"})
@@ -471,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = urlsplit(self.path).path
-        if path not in ("/api/edits", "/api/prefs"):
+        if path not in ("/api/edits", "/api/prefs", "/api/types/settings"):
             return self._send(404, {"error": "not found"})
         if not self._write_ok():
             return
@@ -495,6 +745,14 @@ class Handler(BaseHTTPRequestHandler):
             except sqlite3.Error as e:
                 return self._send(500, {"error": str(e)})
             return self._send(200, {"ok": True})
+        if path == "/api/types/settings":
+            try:
+                save_lookup_settings(body)
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+            except sqlite3.Error as e:
+                return self._send(500, {"error": str(e)})
+            return self._send(200, lookup_settings())
         data = clean_edits(body)
         if data is None:
             return self._send(400, {"error": "invalid edits"})
