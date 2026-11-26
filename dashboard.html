@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Watch history · build 11-25i</title>
+<title>Watch history · build 11-26b</title>
 <style>
 :root{--bg:#f2f2f8;--card:#fff;--card2:#ececf4;--text:#17171f;--mute:#707084;--line:#dedeea;--accent:#6d5efc;--accent2:#c06cff;--ok:#16a34a;--warn:#f59e0b;--bar:rgba(242,242,248,.78);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0a10;--card:#14141d;--card2:#1d1d29;--text:#f0f0f7;--mute:#9a9ab0;--line:#262636;--accent:#8b7dff;--accent2:#ff7ad9;--ok:#4ade80;--bar:rgba(10,10,16,.75);color-scheme:dark}}
@@ -79,6 +79,7 @@ ul{list-style:none;margin:0;padding:0}
 li{display:grid;grid-template-columns:4.8rem 1fr 4.5rem 2.6rem;align-items:center;gap:2px 10px;padding:10px 0;border-top:1px solid var(--line)}
 .pill{justify-self:start;padding:2px 10px;border-radius:999px;background:var(--card2);font-weight:650;font-size:.8rem}
 .pc{text-align:right;font-size:.85rem}.ok{color:var(--ok);font-weight:700}
+.miss{margin:0 0 12px;font-size:.9rem}
 li small{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .empty{grid-column:1/-1;text-align:center;padding:40px 0}
 #drop.mini{margin:8px 0 0;padding:6px 16px;display:inline-flex;border-width:1px;border-radius:999px;transform:none}
@@ -106,13 +107,14 @@ details>summary{cursor:pointer}
 <h1>Watch history</h1>
 <p id="msg" class="mute">Your log is read and shown in this browser only; nothing is uploaded.</p>
 <p id="err" hidden style="color:#ef4444;font-weight:600"></p>
+<p id="dbnote" hidden class="mute" style="font-weight:600"></p>
 <label id="drop"><b>Choose watch-history.jsonl</b><span class="mute">or drop it anywhere on this page</span><input id="file" type="file" accept=".jsonl,.json,.txt" hidden></label>
 <div id="app" hidden>
 <div class="tools">
 <div class="tabs"><button id="tabS" data-tab="series" class="on">Series</button><button id="tabM" data-tab="movies">Movies</button><button data-tab="info">Info</button></div>
 <div class="tabs" title="How watch time is counted"><button data-mode="played" class="on">Reported playtime</button><button data-mode="runtime">Video runtime</button><button data-mode="open">Open→close</button></div>
 <button class="chip on" id="mrg" title="Merge records of the same file opened within 3 seconds of each other">Merge double launches</button>
-<button class="chip" id="exp1">Export library CSV</button><button class="chip" id="exp2">Export sessions CSV</button><button class="chip" id="lp" title="Fetch posters from AniList / MyAnimeList (sends show titles to those sites)">Load posters</button><button class="chip" id="refresh" hidden title="Re-read the log from the server">Refresh</button>
+<button class="chip" id="exp1">Export library CSV</button><button class="chip" id="exp2">Export sessions CSV</button><button class="chip" id="lp" title="Fetch posters from AniList / MyAnimeList (sends show titles to those sites)">Load posters</button><button class="chip" id="refresh" hidden title="Sync new sessions from the log">Refresh</button>
 </div>
 <div id="dash">
 <section id="stats" class="stats"></section>
@@ -154,8 +156,77 @@ const initials=t=>t.split(/\s+/).filter(Boolean).slice(0,2).map(w=>[...w][0].toU
 const lab=(s,e)=>e==null?"Movie":(s!=null?`S${pad(s)}`:"")+`E${pad(e)}`;
 let sessions=[],G=new Map(),tab="series",INFO={},showInfo=false,postersOn=false,whyFn=null;
 let EDITS={version:1,shows:{}},SERVER=false,SERVERINFO={},drawerId="",FIN=new Map();
+let SYNC={},DBROWS=[],DBLAST=0,DBEPOCH=null; // server mode: sessions kept in memory, only new ones are fetched
 const STATUS={watching:"Watching",completed:"Completed",hold:"On hold",dropped:"Dropped",plan:"Plan to watch"};
 const totalOf=k=>{const t=EDITS.shows[k]?.total;return Number.isFinite(t)&&t>0?t:null};
+
+/* Episodes marked as watched outside mpv. Stored per show as edits.manual = {"<season>":[eps]} ("0" = no season).
+   Ids look like "season:ep" (same format as FIN). */
+const manualOf=k=>{
+  const m=EDITS.shows[k]?.manual,out=new Set();
+  if(m&&typeof m==="object")for(const s in m)if(Array.isArray(m[s]))for(const e of m[s])if(Number.isInteger(e))out.add((+s)+":"+e);
+  return out;
+};
+// Season most of this show's real sessions use (0 = none); plain numbers typed in the edit box go here.
+function defSeason(k){
+  const c=new Map();
+  for(const s of sessions)if(s.key===k&&s.ep!=null){const v=s.season??0;c.set(v,(c.get(v)||0)+1)}
+  let best=0,n=0;for(const [v,x] of c)if(x>n){best=v;n=x}
+  return best;
+}
+// [3,4,5,8] -> ["3-5","8"]
+const ranges=(a,sep)=>{
+  const o=[];
+  for(let i=0;i<a.length;){let j=i;while(j+1<a.length&&a[j+1]===a[j]+1)j++;o.push(j>i?a[i]+sep+a[j]:String(a[i]));i=j+1}
+  return o;
+};
+// Episodes with no record at all (no mpv session and not marked manually), up to the highest known episode
+// (or the show's total when it has one season). Returns Map(season -> [eps]).
+function missingOf(k){
+  const have=new Map(),min=+$("min").value;
+  const add=(s,e)=>{let x=have.get(s);if(!x)have.set(s,x=new Set());x.add(e)};
+  for(const s of sessions)if(s.key===k&&s.ep!=null&&keep(s,min))add(s.season??0,s.ep);
+  for(const id of manualOf(k)){const [s,e]=id.split(":").map(Number);add(s,e)}
+  const T=totalOf(k),out=new Map();
+  for(const [s,set] of have){
+    let hi=0;for(const e of set)if(e>hi)hi=e;
+    if(T&&have.size===1&&T>hi)hi=T;
+    const miss=[];for(let e=1;e<=hi;e++)if(!set.has(e))miss.push(e);
+    if(miss.length)out.set(s,miss);
+  }
+  return out;
+}
+const missText=m=>{
+  const multi=m.size>1;
+  return [...m].sort((x,y)=>x[0]-y[0]).map(([s,a])=>(multi||s?(s?"S"+pad(s):"no season")+": ":"")+ranges(a,"–").map(r=>"E"+r).join(", ")).join(" · ");
+};
+// Edit-box text <-> edits.manual. Plain numbers use the show's usual season; "S2: 1-3" picks one.
+function manualToText(k){
+  const m=EDITS.shows[k]?.manual||{},ds=defSeason(k),lines=[];
+  for(const s of Object.keys(m).map(Number).sort((a,b)=>a-b)){
+    const r=ranges(m[s],"-").join(", ");lines.push(+s===ds?r:`S${s}: ${r}`);
+  }
+  return lines.join("\n");
+}
+function textToManual(text,ds){
+  const out={};
+  for(const raw of text.split(/\n|;/)){
+    let line=raw.trim();if(!line)continue;
+    let season=ds;const m=line.match(/^S(\d{1,2})\s*:\s*(.*)$/i);
+    if(m){season=+m[1];line=m[2]}
+    for(const tok of line.replace(/\s*[-–]\s*/g,"-").split(/[,\s]+/)){
+      if(!tok)continue;
+      const r=tok.match(/^(\d{1,4})(?:-(\d{1,4}))?$/);
+      const a=r&&+r[1],b=r&&(r[2]?+r[2]:a);
+      if(!r||a<1||b<a||b-a>2000)throw new Error(`can't read "${tok}" in the watched-outside-mpv box`);
+      const set=out[season]||(out[season]=new Set());
+      for(let e=a;e<=b;e++)set.add(e);
+    }
+  }
+  const res={};
+  for(const s in out)res[s]=[...out[s]].sort((x,y)=>x-y);
+  return res;
+}
 
 function parseName(fn){
   let s=fn.replace(/\.(mkv|mp4|avi|webm|mov|m4v|ts|flv|wmv|mpe?g)$/i,"");
@@ -332,8 +403,8 @@ function renderInfo(){
   $("infoBody").innerHTML=`<h3>Log</h3><p>${esc(INFO.file||"")} · ${INFO.records} records · ${INFO.played} with reported playtime · ${INFO.runtime} with video runtime · newest entry ${INFO.newest}${INFO.bad?` · ${INFO.bad} skipped`:""} · ${merged} double launches merged</p>`
     +`<h3>Found</h3><p>${esc(INFO.found)}</p>`
     +`<h3>Posters</h3><p><span id="covdbg">${postersOn?"":"Not loaded. Press “Load posters” above. "}${covText()}</span> <button class="chip" id="retry">Retry posters</button></p>`
-    +`<h3>Page</h3><p>build 11-25i · ${where()}</p>`
-    +`<h3>Server</h3><p>${SERVER?`connected · log: ${esc(SERVERINFO.log||"")} · edits: ${esc(SERVERINFO.edits||"")} · ${Object.keys(EDITS.shows).length} shows edited`:"not connected (read-only). Start it with <code>python ~/watch-history/server.py</code> and open http://127.0.0.1:8787 to enable editing and Refresh."}</p>`
+    +`<h3>Page</h3><p>build 11-26b · ${where()}</p>`
+    +`<h3>Server</h3><p>${SERVER?`connected · database: ${esc(SERVERINFO.db||"")} · log (read-only): ${esc(SERVERINFO.log||"")} · ${SYNC.total??"?"} sessions stored (${SYNC.added??0} new this sync${SYNC.bad?`, ${SYNC.bad} skipped lines`:""}) · ${Object.keys(EDITS.shows).length} shows edited <button class="chip" data-act="rebuild">Rebuild from log</button>`:"not connected (read-only). Start it with <code>python ~/watch-history/server.py</code> and open http://127.0.0.1:8787 to enable editing and Refresh, or open this file straight from disk and choose watch-history.jsonl (read-only)."}</p>`
     +`<h3>All records (${sessions.length}) and why each is shown or hidden</h3>${rows}`;
 }
 function exportLibrary(){
@@ -448,6 +519,7 @@ function view(first){
     if(s.ep==null||s.pct==null||s.pct<85)continue;
     let f=FIN.get(s.key);if(!f)FIN.set(s.key,f=new Set());f.add((s.season??0)+":"+s.ep);
   }
+  for(const k in EDITS.shows)for(const id of manualOf(k)){let f=FIN.get(k);if(!f)FIN.set(k,f=new Set());f.add(id)}
 
   // library
   $("list").classList.toggle("anim",first===true);
@@ -474,6 +546,7 @@ function editForm(a,ed){
   return `<details class="edit"><summary>Edit</summary>`
     +`<label>Display title<input id="e_title" value="${esc(ed.title||a.title)}"></label>`
     +(isSeries?`<label>Total episodes<input id="e_total" type="number" min="1" step="1" value="${ed.total||""}"></label>`:"")
+    +(isSeries?`<label>Watched outside mpv (episodes)<textarea id="e_manual" rows="2" placeholder="1-11, 14   ·   S2: 1-3">${esc(manualToText(a.key))}</textarea></label>`:"")
     +`<label>Status<select id="e_status"><option value="">–</option>${opt}</select></label>`
     +`<label>Rating (1–10)<input id="e_rating" type="number" min="1" max="10" step="0.5" value="${ed.rating||""}"></label>`
     +`<label>Poster image URL<input id="e_poster" placeholder="https://…" value="${esc(ed.poster||"")}"></label>`
@@ -484,13 +557,20 @@ function editForm(a,ed){
 function openShow(k){
   const a=G.get(k);if(!a)return;
   drawerId=k;
-  const eps=[...a.eps.values()].sort((x,y)=>(x.season??0)-(y.season??0)||(x.ep??1e9)-(y.ep??1e9)||x.last.localeCompare(y.last));
+  const list=[...a.eps.values()];
+  if(k[0]==="s"){ // episodes marked as watched outside mpv (only those with no real session at all)
+    const real=new Set();for(const s of sessions)if(s.key===a.key&&s.ep!=null)real.add((s.season??0)+":"+s.ep);
+    for(const id of manualOf(a.key))if(!real.has(id)){const [sn,en]=id.split(":").map(Number);list.push({season:sn||null,ep:en,manual:true,last:""})}
+  }
+  const eps=list.sort((x,y)=>(x.season??0)-(y.season??0)||(x.ep??1e9)-(y.ep??1e9)||x.last.localeCompare(y.last));
+  const miss=k[0]==="s"?missText(missingOf(a.key)):"";
   const ks=eps.filter(e=>e.pct!=null),dn=ks.filter(e=>e.pct>=85).length;
   const ed=EDITS.shows[a.key]||{},T=k[0]==="s"?totalOf(a.key):null,fd=FIN.get(a.key)?.size||0;
   $("dbody").innerHTML=`<div class="dh">${cov(a.key,a.title)}<div><h4>${esc(a.title)}</h4><small>${eps.length} episodes · ${dur(a.secs)} · ${a.n} sessions<br>last ${a.last.slice(0,10)}${ks.length?` · ${dn} finished`:""}`
     +`${T?`<br>${fd} of ${T} finished${fd<T?` · ${T-fd} left`:" · complete"}`:""}${ed.status?`<br>${esc(STATUS[ed.status]||ed.status)}`:""}${ed.rating?` · ★ ${esc(ed.rating)}/10`:""}</small></div></div>`
+    +(miss?`<p class="miss">Missing: ${esc(miss)}${SERVER?` <button class="chip" id="e_fill">Mark as watched</button>`:""}</p>`:"")
     +(ed.notes?`<p class="note">${esc(ed.notes)}</p>`:"")+editForm(a,ed)+"<ul>"
-    +eps.map(e=>`<li><span class="pill">${lab(e.season,e.ep)}</span><span>${e.last.slice(0,10)} ${e.last.slice(11,16)}</span><span>${dur(e.secs)}${e.n>1?` · ${e.n}×`:""}</span>`
+    +eps.map(e=>e.manual?`<li><span class="pill">${lab(e.season,e.ep)}</span><span class="mute">watched outside mpv</span><span class="mute">manual</span><span class="pc ok">✓</span></li>`:`<li><span class="pill">${lab(e.season,e.ep)}</span><span>${e.last.slice(0,10)} ${e.last.slice(11,16)}</span><span>${dur(e.secs)}${e.n>1?` · ${e.n}×`:""}</span>`
       +`<span class="pc ${e.pct>=85?"ok":""}">${e.pct==null?"–":Math.round(e.pct)+"%"}</span><small title="${esc(e.name)}">${esc(e.name)}</small></li>`).join("")+"</ul>";
   covers$($("dbody"));document.body.classList.add("show");
 }
@@ -505,13 +585,15 @@ async function saveEdits(){
 }
 $("dbody").addEventListener("click",async e=>{
   const id=e.target.id;
-  if(id!=="e_save"&&id!=="e_done"&&id!=="e_reset")return;
+  if(id!=="e_save"&&id!=="e_done"&&id!=="e_reset"&&id!=="e_fill")return;
   const a=G.get(drawerId);if(!a)return;
   const key=a.key;let ed={...(EDITS.shows[key]||{})};
   if(id==="e_reset")ed={};
   else if(id==="e_save"){
     const v=n=>$(n)?$(n).value.trim():"";
     const title=v("e_title"),total=Math.round(+v("e_total")),rating=+v("e_rating"),poster=v("e_poster");
+    let man={};
+    try{man=textToManual($("e_manual")?$("e_manual").value:"",defSeason(key))}catch(err){showErr(err.message||String(err));return}
     ed={};
     if(title&&title!==a.title0)ed.title=title;
     if(total>0)ed.total=total;
@@ -519,8 +601,17 @@ $("dbody").addEventListener("click",async e=>{
     if(rating>0&&rating<=10)ed.rating=rating;
     if(/^https?:\/\//i.test(poster))ed.poster=poster;
     if(v("e_notes"))ed.notes=v("e_notes");
+    if(Object.keys(man).length)ed.manual=man;
+  }else if(id==="e_fill"){ // mark every missing episode as watched outside mpv
+    const miss=missingOf(key);let n=0;for(const x of miss.values())n+=x.length;
+    if(!n)return;
+    if(n>50&&!confirm(`Mark ${n} episodes as watched outside mpv?`))return;
+    const cur={...(ed.manual||{})};
+    for(const [sn,arr] of miss)cur[sn]=[...new Set([...(cur[sn]||[]),...arr])].sort((p,q)=>p-q);
+    ed.manual=cur;
   }else{ // mark completed: total = highest episode seen (unless you already set one)
     let hi=0;for(const s of sessions)if(s.key===key&&s.ep!=null&&s.ep>hi)hi=s.ep;
+    for(const m of manualOf(key)){const en=+m.split(":")[1];if(en>hi)hi=en}
     if(!ed.total&&hi)ed.total=hi;
     ed.status="completed";
   }
@@ -558,12 +649,35 @@ addEventListener("dragleave",()=>document.body.classList.remove("drag"));
 addEventListener("drop",e=>{e.preventDefault();document.body.classList.remove("drag");e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])});
 
 // Server mode: if this page is served by server.py, read the log live and enable editing.
-async function loadFromServer(keep){
-  const r=await fetch("/api/log",{cache:"no-store"});
-  if(!r.ok){let m="";try{m=(await r.json()).error}catch{}throw new Error(m||"HTTP "+r.status)}
-  const text=await r.text();
-  await load({name:"watch-history.jsonl",text:async()=>text},keep);
+async function post(path){
+  const r=await fetch(path,{method:"POST",headers:{"X-WH":"1"}});
+  let d={};try{d=await r.json()}catch{}
+  if(!r.ok)throw new Error(d.error||"HTTP "+r.status);
+  return d;
 }
+function dbNote(){
+  const n=$("dbnote"),parts=[];
+  if(SYNC.log_exists===false)parts.push("Log file not found ("+esc(SERVERINFO.log||"")+"); showing what is already in the database.");
+  if(SYNC.notice)parts.push(esc(SYNC.notice)+" Existing history was kept. <button class=\"chip\" data-act=\"rebuild\">Rebuild from log</button>");
+  n.hidden=!parts.length;n.innerHTML=parts.join("<br>");
+}
+// Sync the database with the log (only new lines are read), then fetch only the sessions we do not have yet.
+async function loadFromServer(keep,rebuildDb){
+  SYNC=await post(rebuildDb?"/api/rebuild":"/api/sync");
+  const r=await fetch("/api/sessions?after="+DBLAST+"&epoch="+(DBEPOCH||""),{cache:"no-store"});
+  if(!r.ok){let m="";try{m=(await r.json()).error}catch{}throw new Error(m||"HTTP "+r.status)}
+  const d=await r.json();
+  DBROWS=(d.reset||DBEPOCH===null)?d.rows:DBROWS.concat(d.rows);
+  DBLAST=d.last_id;DBEPOCH=d.epoch;
+  const text=DBROWS.map(x=>JSON.stringify(x)).join("\n");
+  await load({name:"history.db",text:async()=>text},keep);
+  dbNote();
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest&&e.target.closest("[data-act=rebuild]");if(!b)return;
+  if(!confirm("Rebuild the sessions from the log file?\nSessions that are no longer in the log will be removed from the database. Your edits are kept."))return;
+  try{await loadFromServer(true,true)}catch(err){showErr("Could not rebuild: "+(err.message||err))}
+});
 $("refresh").onclick=()=>loadFromServer(true).catch(e=>showErr("Could not read the log: "+(e.message||e)));
 (async()=>{
   if(!/^https?:$/.test(location.protocol))return;
