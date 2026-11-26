@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>MPVloger · Watch history · build 11-26e</title>
+<title>MPVloger · Watch history · build 11-26g</title>
 <script>
 /* Looks: <html data-look="id">. Set here, before the first paint, so there is no flash of the default look. */
 (function(){var d=document.documentElement,l="violet";
@@ -171,6 +171,7 @@ html[data-look="terminal"] .st{grid-area:s;position:static;justify-self:end;font
 <p id="msg" class="mute">Your log is read and shown in this browser only; nothing is uploaded.</p>
 <p id="err" hidden style="color:#ef4444;font-weight:600"></p>
 <p id="dbnote" hidden class="mute" style="font-weight:600"></p>
+<div id="donenote" class="panel" hidden style="margin:10px 0;padding:10px 14px"></div>
 <label id="drop"><b>Choose watch-history.jsonl</b><span class="mute">or drop it anywhere on this page</span><input id="file" type="file" accept=".jsonl,.json,.txt" hidden></label>
 <div id="app" hidden>
 <div class="tools">
@@ -195,7 +196,7 @@ html[data-look="terminal"] .st{grid-area:s;position:static;justify-self:end;font
 <input id="from" autocomplete="off" type="date" title="From"><input id="to" autocomplete="off" type="date" title="To">
 <select id="sort" autocomplete="off"><option value="last">Recent</option><option value="secs">Most time</option><option value="title">A–Z</option></select>
 <select id="min" autocomplete="off"><option value="0">Show all opens</option><option value="30" selected>Hide under 30 s</option><option value="300">Hide under 5 min</option><option value="600">Hide under 10 min</option></select>
-<select id="prog" autocomplete="off"><option value="all">Any progress</option><option value="done">Finished</option><option value="part">Not finished</option></select><select id="kindf" autocomplete="off"><option value="all">Any type</option><option value="anime">Anime</option><option value="kdrama">K-drama</option><option value="cdrama">C-drama</option><option value="jdrama">J-drama</option><option value="western">Western TV</option><option value="other">Other</option><option value="none">No type</option></select><small id="hid" class="mute"></small><button class="chip" id="clr" hidden>Clear filters ✕</button>
+<select id="prog" autocomplete="off"><option value="all">Any progress</option><option value="done">Finished</option><option value="part">Not finished</option></select><select id="kindf" autocomplete="off"><option value="all">Any type</option><option value="anime">Anime</option><option value="kdrama">K-drama</option><option value="cdrama">C-drama</option><option value="jdrama">J-drama</option><option value="western">Western TV</option><option value="other">Other</option><option value="none">No type</option></select><label class="mute" style="white-space:nowrap" title="Count episodes marked as watched outside mpv in time totals and the calendar (the show needs a date)"><input type="checkbox" id="mantog"> manual in stats</label><label class="mute" style="white-space:nowrap" title="When every episode is finished, offer to set the show to Completed"><input type="checkbox" id="autotog"> suggest Completed</label><small id="hid" class="mute"></small><button class="chip" id="clr" hidden>Clear filters ✕</button>
 </div>
 <div id="list" class="lib" style="margin-top:12px"></div>
 </div>
@@ -421,6 +422,7 @@ function rebuild(first){
     list=out;
   }
   for(const s of list){const ed=EDITS.shows[s.key];s.title0=s.title;if(ed&&ed.title)s.title=ed.title;s.secs=calc(s)}
+  if(manualOn)addManual(list);
   sessions=list.sort((a,b)=>a.om-b.om);
   view(first);
   if(showInfo)renderInfo();
@@ -467,7 +469,7 @@ function renderInfo(){
   $("infoBody").innerHTML=`<h3>Log</h3><p>${esc(INFO.file||"")} · ${INFO.records} records · ${INFO.played} with reported playtime · ${INFO.runtime} with video runtime · newest entry ${INFO.newest}${INFO.bad?` · ${INFO.bad} skipped`:""} · ${merged} double launches merged</p>`
     +`<h3>Found</h3><p>${esc(INFO.found)}</p>`
     +`<h3>Posters</h3><p><span id="covdbg">${postersOn?"":"Not loaded. Press “Load posters” above. "}${covText()}</span> <button class="chip" id="retry">Retry posters</button></p>`
-    +`<h3>Page</h3><p>build 11-26e · ${where()}</p>`
+    +`<h3>Page</h3><p>build 11-26g · ${where()}</p>`
     +`<h3>Server</h3><p>${SERVER?`connected · database: ${esc(SERVERINFO.db||"")} · log (read-only): ${esc(SERVERINFO.log||"")} · ${SYNC.total??"?"} sessions stored (${SYNC.added??0} new this sync${SYNC.bad?`, ${SYNC.bad} skipped lines`:""}) · ${Object.keys(EDITS.shows).length} shows edited <button class="chip" data-act="rebuild">Rebuild from log</button>`:"not connected (read-only). Start it with <code>python ~/watch-history/server.py</code> and open http://127.0.0.1:8787 to enable editing and Refresh, or open this file straight from disk and choose watch-history.jsonl (read-only)."}</p>`
     +`<h3>All records (${sessions.length}) and why each is shown or hidden</h3>${rows}`;
 }
@@ -607,12 +609,17 @@ function view(first){
 function editForm(a,ed){
   if(!SERVER)return '<p class="mute"><small>Editing needs the server (see the Info tab for how to start it).</small></p>';
   const isSeries=a.id[0]==="s";
+  const g=guess(sessions,a.key);
   const opt=Object.entries(STATUS).map(([v,l])=>`<option value="${v}"${ed.status===v?" selected":""}>${l}</option>`).join("");
   const kopt=Object.entries(KINDS).map(([v,l])=>`<option value="${v}"${ed.kind===v?" selected":""}>${l}</option>`).join("");
   return `<details class="edit"><summary>Edit</summary>`
     +`<label>Display title<input id="e_title" value="${esc(ed.title||a.title)}"></label>`
     +(isSeries?`<label>Total episodes<input id="e_total" type="number" min="1" step="1" value="${ed.total||""}"></label>`:"")
     +(isSeries?`<label>Watched outside mpv (episodes)<textarea id="e_manual" rows="2" placeholder="1-11, 14   ·   S2: 1-3">${esc(manualToText(a.key))}</textarea></label>`:"")
+    +(isSeries?`<label>Date watched (for manual episodes)<input id="e_mday" type="date" value="${esc(ed.mday||"")}"></label>`:"")
+    +(isSeries?`<label>Minutes per manual episode<input id="e_mmin" type="number" min="1" step="0.5" placeholder="${g.secs?"auto: "+Math.round(g.secs/60):"auto: no data yet"}" value="${ed.mmin||""}"></label>`:"")
+    +(isSeries?`<label>Size per manual episode (MB)<input id="e_mmb" type="number" min="1" step="1" placeholder="${g.size?"auto: "+Math.round(g.size/1048576):"auto: no data yet"}" value="${ed.mmb||""}"></label>`:"")
+    +(isSeries?`<p class="mute"><small>Manual episodes show in time stats and on the calendar only when “manual in stats” (top) is ticked and a date is set. Blank minutes and size are guessed from this show’s real episodes.</small></p>`:"")
     +`<label>Type<select id="e_kind"><option value="">–</option>${kopt}</select></label>`
     +`<label>Status<select id="e_status"><option value="">–</option>${opt}</select></label>`
     +`<label>Rating (1–10)<input id="e_rating" type="number" min="1" max="10" step="0.5" value="${ed.rating||""}"></label>`
@@ -658,7 +665,7 @@ $("dbody").addEventListener("click",async e=>{
   if(id==="e_reset")ed={};
   else if(id==="e_save"){
     const v=n=>$(n)?$(n).value.trim():"";
-    const title=v("e_title"),total=Math.round(+v("e_total")),rating=+v("e_rating"),poster=v("e_poster");
+    const title=v("e_title"),total=Math.round(+v("e_total")),rating=+v("e_rating"),poster=v("e_poster"),mday=v("e_mday"),mmin=+v("e_mmin"),mmb=+v("e_mmb");
     let man={};
     try{man=textToManual($("e_manual")?$("e_manual").value:"",defSeason(key))}catch(err){showErr(err.message||String(err));return}
     ed={};
@@ -666,6 +673,9 @@ $("dbody").addEventListener("click",async e=>{
     if(total>0)ed.total=total;
     if(v("e_status"))ed.status=v("e_status");
     if(v("e_kind"))ed.kind=v("e_kind");
+    if(/^\d{4}-\d{2}-\d{2}$/.test(mday))ed.mday=mday;
+    if(mmin>0)ed.mmin=mmin;
+    if(mmb>0)ed.mmb=mmb;
     if(rating>0&&rating<=10)ed.rating=rating;
     if(/^https?:\/\//i.test(poster))ed.poster=poster;
     if(v("e_notes"))ed.notes=v("e_notes");
@@ -716,6 +726,42 @@ addEventListener("dragover",e=>{e.preventDefault();document.body.classList.add("
 addEventListener("dragleave",()=>document.body.classList.remove("drag"));
 addEventListener("drop",e=>{e.preventDefault();document.body.classList.remove("drag");e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])});
 
+
+
+// Episodes marked as watched outside mpv can count in the time stats and calendar (switch "manual in stats").
+// Needs a date on the show. Time per episode = median runtime of its real episodes, size = their average,
+// unless you filled in minutes / MB on the show.
+let manualOn=false;try{manualOn=localStorage.getItem("mpvloger.manual")==="1"}catch{}
+function guess(list,key){
+  const durs=[],szs=[],seen=new Set();
+  for(const s of list)if(s.key===key&&s.ep!=null&&!s.manual){
+    if(s.dur)durs.push(s.dur);else if(s.pct!=null&&s.pct>=85&&s.watched)durs.push(s.watched);
+    if(s.size>0&&!seen.has(s.name)){seen.add(s.name);szs.push(s.size)}
+  }
+  let secs=null;
+  if(durs.length){durs.sort((x,y)=>x-y);const m=durs.length>>1;secs=durs.length%2?durs[m]:(durs[m-1]+durs[m])/2}
+  return {secs,size:szs.length?szs.reduce((x,y)=>x+y,0)/szs.length:null};
+}
+function addManual(list){
+  const real=new Set(),raw=list.slice();
+  for(const s of raw)if(s.ep!=null)real.add(s.key+"|"+(s.season??0)+":"+s.ep);
+  for(const key in EDITS.shows){
+    const ed=EDITS.shows[key];
+    if(!ed.manual||!/^\d{4}-\d{2}-\d{2}$/.test(ed.mday||""))continue;
+    const base=raw.find(s=>s.key===key&&s.ep!=null);if(!base)continue;
+    const g=guess(raw,key),secs=ed.mmin>0?ed.mmin*60:g.secs,size=ed.mmb>0?ed.mmb*1048576:(g.size||0);
+    let n=0;
+    for(const sn in ed.manual)for(const ep of ed.manual[sn]){
+      if(real.has(key+"|"+sn+":"+ep))continue;
+      const om=Date.parse(ed.mday+"T12:00:00")+(n++)*1000;
+      const x={...base,name:"[manual] "+base.title0+" E"+ep,folder:"",season:+sn||null,ep,opened:ed.mday+"T12:00:00",closed:ed.mday+"T12:00:00",
+        om,cm:om+(secs||0)*1000,wall:secs||0,watched:secs||0,dur:secs,day:ed.mday,pct:100,size,manual:true};
+      x.secs=calc(x);list.push(x);
+    }
+  }
+}
+$("mantog").checked=manualOn;
+$("mantog").onchange=()=>{manualOn=$("mantog").checked;try{localStorage.setItem("mpvloger.manual",manualOn?"1":"0")}catch{}rebuild()};
 
 // Types: find out online whether a show is anime, a K-drama, etc. Nothing is sent until you press Send.
 const SRC={anilist:"AniList",tvmaze:"TVmaze",tmdb:"TMDB"};
@@ -768,7 +814,7 @@ function renderTypes(){
     h+="<p><b>Results</b> <small class=\"mute\">(unsure matches are not ticked)</small></p>"
       +TY.res.map((r,i)=>r.kind==="unknown"
         ?`<div class="mute">${esc(tyTitle(r.key))}: no match</div>`
-        :`<label style="display:block"><input type="checkbox" data-rs="${i}"${r.confident?" checked":""}> ${esc(tyTitle(r.key))} → <select data-rk="${i}">${Object.entries(KINDS).map(([v,l])=>`<option value="${v}"${r.kind===v?" selected":""}>${l}</option>`).join("")}</select> <span class="mute">matched “${esc(r.matched)}” via ${esc(SRC[r.source]||"")}</span></label>`).join("")
+        :`<label style="display:block"><input type="checkbox" data-rs="${i}"${r.confident?" checked":""}> ${esc(tyTitle(r.key))} → <select data-rk="${i}">${Object.entries(KINDS).map(([v,l])=>`<option value="${v}"${r.kind===v?" selected":""}>${l}</option>`).join("")}</select> <span class="mute">matched “${esc(r.matched)}” via ${esc(SRC[r.source]||"")}${r.episodes?` · ${r.episodes} eps`:""}</span></label>`).join("")
       +`<p><button class="chip" data-ty="apply">Apply ticked</button></p>`;
   }
   box.innerHTML=h;
@@ -819,13 +865,47 @@ $("typesBox").addEventListener("click",async e=>{
       let n=0;
       box.querySelectorAll("[data-rs]:checked").forEach(c=>{
         const r=TY.res[+c.dataset.rs],cur=EDITS.shows[r.key]||{};
-        if(KINDS[r.kind]&&!cur.kind){EDITS.shows[r.key]={...cur,kind:r.kind};n++}
+        if(KINDS[r.kind]&&!cur.kind){const nx={...cur,kind:r.kind};if(!cur.total&&r.episodes>0)nx.total=r.episodes;EDITS.shows[r.key]=nx;n++}
       });
       if(n){TY.res=null;TY.msg=`Applied ${n} types.`;await saveEdits()}else{TY.msg="Nothing ticked.";renderTypes()}
     }
   }catch(err){TY.msg=err.message||String(err);renderTypes()}
 });
 {const base=renderInfo;renderInfo=function(){base();renderTypes()}}
+
+
+// Suggest Completed (off by default): when the finished episodes reach a show's total, offer to mark it Completed.
+// Never changes anything by itself. Dropped and already-completed shows are skipped; "Not now" is remembered
+// for that show and total.
+let autoOn=false,noAuto=new Set(),DONE=[];
+try{autoOn=localStorage.getItem("mpvloger.auto")==="1";noAuto=new Set(JSON.parse(localStorage.getItem("mpvloger.noauto")||"[]"))}catch{}
+function checkComplete(){
+  const box=$("donenote");DONE=[];
+  if(autoOn&&SERVER)for(const [key,fin] of FIN){
+    const T=totalOf(key),st=EDITS.shows[key]?.status;
+    if(T&&fin.size>=T&&st!=="completed"&&st!=="dropped"&&!noAuto.has(key+"|"+T))DONE.push({key,T});
+  }
+  if(!DONE.length){box.hidden=true;return}
+  box.hidden=false;
+  box.innerHTML=DONE.slice(0,5).map((d,i)=>`<div>${esc(tyTitle(d.key))} has all ${d.T} episodes finished. <button class="chip" data-done="${i}">Mark completed</button> <button class="chip" data-later="${i}">Not now</button></div>`).join("")
+    +(DONE.length>5?`<div class="mute">…and ${DONE.length-5} more</div>`:"")
+    +(DONE.length>1?`<div><button class="chip" data-doneall="1">Mark all ${DONE.length} completed</button></div>`:"");
+}
+$("donenote").addEventListener("click",async e=>{
+  const d=e.target.dataset||{};
+  if(d.later!==undefined){
+    const x=DONE[+d.later];if(!x)return;
+    noAuto.add(x.key+"|"+x.T);try{localStorage.setItem("mpvloger.noauto",JSON.stringify([...noAuto]))}catch{}
+    checkComplete();return;
+  }
+  const list=d.done!==undefined?[DONE[+d.done]]:d.doneall?DONE.slice():[];
+  if(!list.length||!list[0])return;
+  for(const x of list)EDITS.shows[x.key]={...(EDITS.shows[x.key]||{}),status:"completed"};
+  await saveEdits();
+});
+$("autotog").checked=autoOn;
+$("autotog").onchange=()=>{autoOn=$("autotog").checked;try{localStorage.setItem("mpvloger.auto",autoOn?"1":"0")}catch{}checkComplete()};
+{const base=view;view=function(first){base(first);checkComplete()}}
 
 // Looks: the options of select#look decide what exists (see the LOOKS comment in the CSS).
 // The choice is kept in the browser, and in the database when the server runs.

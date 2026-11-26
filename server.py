@@ -61,6 +61,9 @@ FIELDS = {  # allowed per-show fields and their types
     "poster": str,
     "notes": str,
     "kind": str,
+    "mday": str,  # date the manually-added episodes were watched
+    "mmin": (int, float),  # minutes per manual episode (blank = guessed by the page)
+    "mmb": (int, float),  # size per manual episode in MB (blank = guessed by the page)
 }
 STAMPS = ("rev", "updated")  # owned by the server; anything the browser sends for these is ignored
 
@@ -74,7 +77,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE TABLE IF NOT EXISTS shows (
   key TEXT PRIMARY KEY,
-  title TEXT, total INTEGER, status TEXT, rating REAL, poster TEXT, notes TEXT, kind TEXT,
+  title TEXT, total INTEGER, status TEXT, rating REAL, poster TEXT, notes TEXT, kind TEXT, mday TEXT, mmin REAL, mmb REAL,
   rev INTEGER NOT NULL, updated TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS manual_eps (
@@ -98,8 +101,10 @@ def open_db():
     DB.execute("PRAGMA journal_mode=WAL")
     DB.execute("PRAGMA synchronous=NORMAL")
     DB.executescript(SCHEMA)
-    if "kind" not in [r[1] for r in DB.execute("PRAGMA table_info(shows)")]:  # database made before types existed
-        DB.execute("ALTER TABLE shows ADD COLUMN kind TEXT")
+    have = [r[1] for r in DB.execute("PRAGMA table_info(shows)")]
+    for col, typ in (("kind", "TEXT"), ("mday", "TEXT"), ("mmin", "REAL"), ("mmb", "REAL")):
+        if col not in have:  # database made by an older build
+            DB.execute(f"ALTER TABLE shows ADD COLUMN {col} {typ}")
     if not meta_get("epoch"):
         meta_set("epoch", secrets.token_hex(4))
 
@@ -253,6 +258,14 @@ def sessions_since(after, epoch):
 
 # ---------------------------------------------------------------- edits (stored in the database)
 
+def _valid_day(v):
+    try:
+        datetime.date.fromisoformat(v)
+        return len(v) == 10
+    except ValueError:
+        return False
+
+
 def clean_manual(v):
     """Episodes watched outside mpv: {"1": [1, 2, 3]} = season number as text ("0" = no season)
     mapped to sorted, unique episode numbers. Returns None when nothing valid is left."""
@@ -322,9 +335,13 @@ def clean_edits(data):
                     continue
                 if field == "kind" and v not in KINDS:
                     continue
+                if field == "mday" and not _valid_day(v):
+                    continue
             if field == "total" and v < 1:
                 continue
             if field == "rating" and not 0 < v <= 10:
+                continue
+            if field in ("mmin", "mmb") and not 0 < v <= (1000 if field == "mmin" else 100000):
                 continue
             item[field] = v
         manual = clean_manual(ed.get("manual"))
@@ -339,11 +356,12 @@ def load_edits():
     """The edits in the shape the dashboard uses: {"version", "rev", "shows": {key: {...}}}."""
     with LOCK:
         shows = {}
-        for key, title, total, status, rating, poster, notes, kind, rev, updated in DB.execute(
-                "SELECT key, title, total, status, rating, poster, notes, kind, rev, updated FROM shows"):
+        for key, title, total, status, rating, poster, notes, kind, mday, mmin, mmb, rev, updated in DB.execute(
+                "SELECT key, title, total, status, rating, poster, notes, kind, mday, mmin, mmb, rev, updated FROM shows"):
             item = {}
             for name, val in (("title", title), ("total", total), ("status", status),
-                              ("rating", rating), ("poster", poster), ("notes", notes), ("kind", kind)):
+                              ("rating", rating), ("poster", poster), ("notes", notes), ("kind", kind),
+                              ("mday", mday), ("mmin", mmin), ("mmb", mmb)):
                 if val is not None:
                     item[name] = val
             item["rev"] = rev
@@ -373,13 +391,15 @@ def put_edits(new):
         for key in changed:
             item = data["shows"][key]
             DB.execute(
-                "INSERT INTO shows (key, title, total, status, rating, poster, notes, kind, rev, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
+                "INSERT INTO shows (key, title, total, status, rating, poster, notes, kind, mday, mmin, mmb, rev, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
                 "title = excluded.title, total = excluded.total, status = excluded.status, "
                 "rating = excluded.rating, poster = excluded.poster, notes = excluded.notes, kind = excluded.kind, "
+                "mday = excluded.mday, mmin = excluded.mmin, mmb = excluded.mmb, "
                 "rev = excluded.rev, updated = excluded.updated",
                 (key, item.get("title"), item.get("total"), item.get("status"), item.get("rating"),
-                 item.get("poster"), item.get("notes"), item.get("kind"), item["rev"], item["updated"]))
+                 item.get("poster"), item.get("notes"), item.get("kind"), item.get("mday"), item.get("mmin"), item.get("mmb"),
+                 item["rev"], item["updated"]))
             have = {(s, e) for s, e in DB.execute("SELECT season, ep FROM manual_eps WHERE show_key = ?", (key,))}
             want = {(int(s), e) for s, eps in item.get("manual", {}).items() for e in eps}
             for s, e in have - want:
@@ -399,7 +419,7 @@ SOURCES = ("anilist", "tmdb", "tvmaze")  # order tried
 GAP = {"anilist": 2.1, "tmdb": 0.3, "tvmaze": 0.6}  # seconds between calls
 MAX_ITEMS = 10  # titles per detect call
 ANILIST_Q = ("query($s:String){Media(search:$s,type:ANIME){title{romaji english} synonyms "
-             "startDate{year} countryOfOrigin}}")
+             "startDate{year} countryOfOrigin episodes}}")
 
 
 class RateLimited(Exception):
@@ -461,7 +481,8 @@ def look_anilist(title, year, key):
     if not names:
         return None
     best = max(names, key=lambda n: _sim(title, n))
-    return "anime", best, _sim(title, best), (m.get("startDate") or {}).get("year")
+    eps = m.get("episodes")
+    return "anime", best, _sim(title, best), (m.get("startDate") or {}).get("year"), eps if isinstance(eps, int) else None
 
 
 def look_tvmaze(title, year, key):
@@ -477,17 +498,25 @@ def look_tvmaze(title, year, key):
     sc, s = best
     ch = s.get("network") or s.get("webChannel") or {}
     kind = _kind_from((ch.get("country") or {}).get("code"), s.get("language"), s.get("type") == "Animation")
-    return kind, s.get("name", ""), sc, _year_of(s.get("premiered"))
+    eps = None
+    if sc >= 0.88 and isinstance(s.get("id"), int):  # one more call, only for a likely match
+        time.sleep(GAP["tvmaze"])
+        lst = _fetch(f"https://api.tvmaze.com/shows/{s['id']}/episodes")
+        eps = len(lst) if isinstance(lst, list) and lst else None
+    return kind, s.get("name", ""), sc, _year_of(s.get("premiered")), eps
 
 
 def look_tmdb(title, year, key):
-    q = {"query": title, "include_adult": "false", "language": "en-US", "page": "1"}
-    headers = {}
-    if key.startswith("eyJ"):  # API Read Access Token (TMDB's default)
-        headers["Authorization"] = "Bearer " + key
-    else:  # older v3 API key
-        q["api_key"] = key
-    res = _fetch("https://api.themoviedb.org/3/search/tv?" + urlencode(q), headers=headers)
+    def call(url, q):
+        headers = {}
+        if key.startswith("eyJ"):  # API Read Access Token (TMDB's default)
+            headers["Authorization"] = "Bearer " + key
+        else:  # older v3 API key
+            q = dict(q, api_key=key)
+        return _fetch(url + "?" + urlencode(q), headers=headers)
+
+    res = call("https://api.themoviedb.org/3/search/tv",
+               {"query": title, "include_adult": "false", "language": "en-US", "page": "1"})
     best = None
     for r in (res.get("results") or [])[:5]:
         sc = max(_sim(title, r.get("name", "")), _sim(title, r.get("original_name", "")))
@@ -497,7 +526,12 @@ def look_tmdb(title, year, key):
         return None
     sc, r = best
     kind = _kind_from((r.get("origin_country") or [None])[0], r.get("original_language"), 16 in (r.get("genre_ids") or []))
-    return kind, r.get("name", ""), sc, _year_of(r.get("first_air_date"))
+    eps = None
+    if sc >= 0.88 and isinstance(r.get("id"), int):  # the search result has no episode count; one more call
+        time.sleep(GAP["tmdb"])
+        n = call(f"https://api.themoviedb.org/3/tv/{r['id']}", {"language": "en-US"}).get("number_of_episodes")
+        eps = n if isinstance(n, int) and n > 0 else None
+    return kind, r.get("name", ""), sc, _year_of(r.get("first_air_date")), eps
 
 
 def lookup_settings():
@@ -586,8 +620,8 @@ def detect(items):
             finally:
                 time.sleep(GAP[name])
             if r:
-                kind, matched, score, got = r
-                cand = (score >= 0.88 and _year_ok(it["year"], got), score, kind, name, matched)
+                kind, matched, score, got, eps = r
+                cand = (score >= 0.88 and _year_ok(it["year"], got), score, kind, name, matched, eps)
                 if best is None or cand[:2] > best[:2]:
                     best = cand
                 if cand[0]:
@@ -596,7 +630,7 @@ def detect(items):
             break
         out.append({"key": it["key"], "kind": best[2] if best else "unknown", "source": best[3] if best else "",
                     "matched": best[4] if best else "", "score": round(best[1], 2) if best else 0,
-                    "confident": bool(best and best[0])})
+                    "confident": bool(best and best[0]), "episodes": best[5] if best else None})
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     with tx():
         for r in out:
